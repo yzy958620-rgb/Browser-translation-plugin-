@@ -41,10 +41,15 @@
 
       <section class="card">
         <div class="card-head">
-          <label for="input">中文输入</label>
+          <label for="input">单条翻译</label>
           <span id="count" class="count">0</span>
         </div>
-        <textarea id="input" rows="5" placeholder="输入中文…（Ctrl + Enter 翻译）"></textarea>
+        <div class="actions lang-row">
+          <select id="sourceLang" title="源语言"></select>
+          <span class="lang-arrow">→</span>
+          <select id="popupTargetLang" title="目标语言"></select>
+        </div>
+        <textarea id="input" rows="5" placeholder="输入要翻译的内容…（Ctrl + Enter 翻译）"></textarea>
         <div class="actions">
           <select id="style" title="译文风格">
             <option value="natural">自然日常</option>
@@ -60,7 +65,7 @@
 
       <section class="card">
         <div class="card-head">
-          <label for="output">英文结果</label>
+          <label for="output">译文</label>
           <span id="status" class="status"></span>
         </div>
         <textarea id="output" rows="5" placeholder="翻译结果会出现在这里…"></textarea>
@@ -72,8 +77,8 @@
     </main>
 
     <footer class="footer">
-      右键页面 →「DeepSeek 全文翻译此页」· 选中文字右键 →「用 AI 翻译为英文」<br />
-      全文翻译 Alt+Shift+T · 选中翻译 Alt+Shift+S · 恢复原文 Alt+Shift+R
+      右键页面 →「DeepSeek 全文翻译此页」· 选中文字右键 →「用 AI 翻译为英文」（固定译为英文）<br />
+      快捷键：全文 Alt+Shift+T · 选中 Alt+Shift+S · 恢复 Alt+Shift+R（可在 chrome://extensions/shortcuts 修改）
     </footer>
   </div>
   <script src="langs.js"></script>

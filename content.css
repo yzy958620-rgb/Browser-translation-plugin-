@@ -108,14 +108,32 @@
 
 .dst-btn--ghost:hover { background: #fef2f2; }
 
-/* 双语模式：原文弱化显示在译文之后 */
-.dst-wrap { display: inline; }
-.dst-wrap .dst-orig {
-  display: inline;
-  color: #6b7280;
-  opacity: .75;
-  font-size: .92em;
-  text-decoration: none;
+/* 沉浸式双语：译文以独立段落显示在原文下方（块级元素） */
+.dst-block-translation {
+  display: block;
+  margin-top: 0.35em;
+  padding-top: 0.35em;
+  border-top: 1px dashed rgba(120, 130, 145, 0.55);
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  white-space: pre-wrap;
 }
-.dst-wrap .dst-orig::before { content: "（"; }
-.dst-wrap .dst-orig::after { content: "）"; }
+
+/* 内联元素（按钮、链接等）：译文紧跟原文之后 */
+.dst-inline-translation {
+  display: inline;
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
+}
+.dst-inline-translation::before { content: "\00a0"; }
+
+@media (prefers-color-scheme: dark) {
+  .dst-block-translation {
+    border-top-color: rgba(160, 170, 185, 0.4);
+  }
+}
+

@@ -265,7 +265,8 @@
         const parent = node.parentElement;
         if (!parent) return NodeFilter.FILTER_REJECT;
         if (SKIP_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
-        if (parent.closest('[data-dst-panel]') || parent.closest('.dst-wrap')) return NodeFilter.FILTER_REJECT;
+        if (parent.closest('[data-dst-panel]')) return NodeFilter.FILTER_REJECT;
+        if (parent.closest('[data-dst-translation]')) return NodeFilter.FILTER_REJECT;
         if (opts.skipCode && parent.closest('code, pre, kbd, samp, var')) return NodeFilter.FILTER_REJECT;
         if (!isVisible(parent)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
@@ -305,7 +306,7 @@
         node,
         original,
         segs: splitSegments(original, ITEM_MAX_CHARS).map((text) => ({ text, translated: null })),
-        wrapper: null
+        inserted: null
       };
     });
   }
@@ -343,43 +344,49 @@
     return rec.segs.some((seg) => seg.translated != null);
   }
 
-  function unwrapRec(rec) {
-    if (rec.wrapper && rec.wrapper.parentNode) {
-      rec.wrapper.parentNode.replaceChild(rec.node, rec.wrapper);
-    }
-    rec.wrapper = null;
+  function removeInserted(rec) {
+    if (rec.inserted && rec.inserted.parentNode) rec.inserted.remove();
+    rec.inserted = null;
   }
 
-  function ensureWrapper(rec) {
-    if (rec.wrapper && rec.wrapper.parentNode) return rec.wrapper;
+  /* 块级容器 → 译文独立成段；内联容器 → 译文紧随其后 */
+  function isBlockLike(el) {
+    const d = getComputedStyle(el).display;
+    return d === 'block' || d === 'flex' || d === 'grid' || d === 'list-item' ||
+      d === 'flow-root' || d === 'table' || d === 'table-cell' || d === 'table-caption';
+  }
+
+  function insertTranslation(rec, text) {
+    if (rec.inserted && rec.inserted.parentNode) {
+      rec.inserted.textContent = text;
+      return;
+    }
     const parent = rec.node.parentNode;
-    if (!parent) return null;
-    const wrap = document.createElement('span');
-    wrap.className = 'dst-wrap';
-    const trans = document.createElement('span');
-    trans.className = 'dst-trans';
-    const orig = document.createElement('span');
-    orig.className = 'dst-orig';
-    orig.textContent = rec.original;
-    wrap.appendChild(trans);
-    wrap.appendChild(orig);
-    parent.replaceChild(wrap, rec.node);
-    rec.wrapper = wrap;
-    rec.transEl = trans;
-    return wrap;
+    if (!parent) return;
+    const block = isBlockLike(parent);
+    const el = document.createElement('span');
+    el.className = block ? 'dst-block-translation' : 'dst-inline-translation';
+    el.setAttribute('data-dst-translation', '1');
+    el.textContent = text;
+    if (block) parent.appendChild(el);
+    else parent.insertBefore(el, rec.node.nextSibling);
+    rec.inserted = el;
   }
 
   function applyRec(rec, mode) {
-    if (!document.contains(rec.node) && !(rec.wrapper && document.contains(rec.wrapper))) return;
+    if (!document.contains(rec.node)) {
+      removeInserted(rec);
+      return;
+    }
     const text = currentText(rec);
-    rec.node.nodeValue = text;
-
-    if (mode === 'bilingual' && hasAnyTranslation(rec)) {
-      const wrap = ensureWrapper(rec);
-      if (!wrap) return;
-      rec.transEl.textContent = text;
+    if (mode === 'bilingual') {
+      // 沉浸式：原文保持不动，译文插入原文下方
+      rec.node.nodeValue = rec.original;
+      if (hasAnyTranslation(rec)) insertTranslation(rec, text);
+      else removeInserted(rec);
     } else {
-      unwrapRec(rec);
+      removeInserted(rec);
+      rec.node.nodeValue = (mode === 'translation' && hasAnyTranslation(rec)) ? text : rec.original;
     }
   }
 
@@ -392,7 +399,7 @@
   function restoreOriginal() {
     for (const rec of records) {
       try {
-        unwrapRec(rec);
+        removeInserted(rec);
         if (rec.node) rec.node.nodeValue = rec.original;
       } catch (_) { /* ignore */ }
     }
@@ -563,7 +570,7 @@
       done: 0,
       failed: 0,
       running: true,
-      mode: settings.pageMode === 'bilingual' ? 'bilingual' : 'translation',
+      mode: settings.pageMode === 'translation' ? 'translation' : 'bilingual',
       keyError: false,
       lastError: ''
     };
@@ -607,19 +614,30 @@
     if (ui) { ui.root.remove(); ui = null; }
   }
 
-  /* Ctrl+T 在 Chrome 中是浏览器保留快捷键（新建标签页），扩展无法保证拦截；
-     这里仍然尝试捕获，在允许覆盖的浏览器/版本中会直接生效。
-     可靠的默认快捷键为 Alt+Shift+T，可在 chrome://extensions/shortcuts 中修改。 */
+  /* 快捷键页面级兜底：即使 Chrome commands 失效（焦点异常、冲突等），
+     只要页面获得焦点就能触发；由 background 统一节流防止双触发。
+     注意 Ctrl+T 是浏览器保留快捷键（新建标签页），仍会优先打开新标签页。 */
   document.addEventListener('keydown', (e) => {
-    if (e.defaultPrevented) return;
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key || '').toLowerCase() === 't') {
-      const el = document.activeElement;
-      const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-      if (typing) return;
-      e.preventDefault();
-      e.stopPropagation();
-      startPageTranslate();
+    if (e.defaultPrevented || !e.isTrusted) return;
+    const k = (e.key || '').toLowerCase();
+    const el = document.activeElement;
+    const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+
+    let action = null;
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && k === 't') action = 'page';
+    else if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      if (k === 't') action = 'page';
+      else if (k === 'r') action = 'restore';
+      else if (k === 's') action = 'selection';
     }
+    if (!action || typing) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      const p = chrome.runtime.sendMessage({ type: 'shortcut', action });
+      if (p && p.catch) p.catch(() => { /* ignore */ });
+    } catch (_) { /* ignore */ }
   }, true);
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

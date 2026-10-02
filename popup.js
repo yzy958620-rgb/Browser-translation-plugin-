@@ -17,18 +17,27 @@ const warnBtn = $('#warnBtn');
 const targetLangEl = $('#targetLang');
 const pageBtn = $('#pageBtn');
 const restoreBtn = $('#restoreBtn');
+const sourceLangEl = $('#sourceLang');
+const popupTargetEl = $('#popupTargetLang');
 
 let apiKey = '';
 
-function fillTargetLang(current) {
-  targetLangEl.innerHTML = '';
+function fillLangSelect(selectEl, current, withAuto) {
+  selectEl.innerHTML = '';
+  if (withAuto) {
+    const auto = document.createElement('option');
+    auto.value = 'auto';
+    auto.textContent = '自动检测 Auto detect';
+    selectEl.appendChild(auto);
+  }
   Object.keys(LANGUAGES).forEach((code) => {
     const opt = document.createElement('option');
     opt.value = code;
     opt.textContent = LANGUAGES[code];
-    targetLangEl.appendChild(opt);
+    selectEl.appendChild(opt);
   });
-  targetLangEl.value = LANGUAGES[current] ? current : 'zh';
+  const fallback = withAuto ? 'auto' : 'zh';
+  selectEl.value = selectEl.querySelector(`option[value="${current}"]`) ? current : fallback;
 }
 
 function setStatus(text, kind = '') {
@@ -41,10 +50,15 @@ function updateCount() {
 }
 
 async function init() {
-  const cfg = await chrome.storage.sync.get({ apiKey: '', style: 'natural', targetLang: 'zh' });
+  const cfg = await chrome.storage.sync.get({
+    apiKey: '', style: 'natural', targetLang: 'zh',
+    popupSourceLang: 'auto', popupTargetLang: 'en'
+  });
   apiKey = cfg.apiKey || '';
   if (cfg.style) styleEl.value = cfg.style;
-  fillTargetLang(cfg.targetLang);
+  fillLangSelect(targetLangEl, cfg.targetLang, false);
+  fillLangSelect(sourceLangEl, cfg.popupSourceLang, true);
+  fillLangSelect(popupTargetEl, cfg.popupTargetLang, false);
   warnEl.classList.toggle('hidden', !!apiKey);
   updateCount();
   inputEl.focus();
@@ -78,6 +92,14 @@ styleEl.addEventListener('change', () => {
 
 targetLangEl.addEventListener('change', () => {
   chrome.storage.sync.set({ targetLang: targetLangEl.value });
+});
+
+sourceLangEl.addEventListener('change', () => {
+  chrome.storage.sync.set({ popupSourceLang: sourceLangEl.value });
+});
+
+popupTargetEl.addEventListener('change', () => {
+  chrome.storage.sync.set({ popupTargetLang: popupTargetEl.value });
 });
 
 pageBtn.addEventListener('click', async () => {
@@ -119,7 +141,7 @@ restoreBtn.addEventListener('click', async () => {
 async function runTranslate() {
   const text = inputEl.value.trim();
   if (!text) {
-    setStatus('请先输入中文', 'error');
+    setStatus('请先输入内容', 'error');
     inputEl.focus();
     return;
   }
@@ -134,11 +156,17 @@ async function runTranslate() {
   setStatus('正在调用 DeepSeek…');
   outputEl.value = '';
 
+  const sourceLang = sourceLangEl.value || 'auto';
+  const targetLang = popupTargetEl.value || 'en';
+  chrome.storage.sync.set({ popupSourceLang: sourceLang, popupTargetLang: targetLang });
+
   try {
     const res = await chrome.runtime.sendMessage({
       type: 'translate',
       text,
-      style: styleEl.value
+      style: styleEl.value,
+      sourceLang,
+      targetLang
     });
     if (res?.ok) {
       outputEl.value = res.text;

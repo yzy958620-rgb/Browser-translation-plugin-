@@ -30,7 +30,7 @@ const DEFAULTS = {
   glossary: '',
   customPrompt: '',
   targetLang: 'zh',
-  pageMode: 'translation',
+  pageMode: 'bilingual',
   chunkChars: 1200,
   concurrency: 3,
   skipCode: true,
@@ -138,5 +138,13 @@ testBtn.addEventListener('click', async () => {
     testBtn.textContent = '测试连接';
   }
 });
+
+const shortcutsLink = $('#shortcutsLink');
+if (shortcutsLink) {
+  shortcutsLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  });
+}
 
 load();

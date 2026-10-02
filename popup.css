@@ -189,3 +189,11 @@ button.primary-btn, button.ghost-btn, button.soft-btn {
   color: var(--muted);
   text-align: right;
 }
+
+.lang-row { margin-top: 2px; }
+.lang-row select { min-width: 0; }
+.lang-arrow {
+  color: var(--muted);
+  font-size: 13px;
+  flex: 0 0 auto;
+}

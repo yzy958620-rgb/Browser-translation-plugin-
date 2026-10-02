@@ -59,6 +59,12 @@
     <section class="card">
       <h2 class="sec-title">全文翻译</h2>
 
+      <p class="hint" style="margin-bottom:14px;">
+        快捷键冲突或无效？打开
+        <a href="#" id="shortcutsLink">chrome://extensions/shortcuts</a>
+        修改「DeepSeek AI 翻译助手」的快捷键。即使快捷键失效，也可用右键菜单或扩展弹窗触发。
+      </p>
+
       <div class="grid">
         <div class="field">
           <label for="targetLang">目标语言</label>
@@ -67,8 +73,8 @@
         <div class="field">
           <label for="pageMode">页面默认显示</label>
           <select id="pageMode">
-            <option value="translation">只显示译文</option>
-            <option value="bilingual">双语对照（译文中括号显示原文）</option>
+            <option value="bilingual">双语对照（译文显示在原文下方，沉浸式）</option>
+            <option value="translation">只显示译文（覆盖原文）</option>
           </select>
         </div>
       </div>
