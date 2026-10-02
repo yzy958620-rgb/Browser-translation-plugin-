@@ -1,7 +1,8 @@
-/* content.css —— 沉浸式双语译文标记样式（不注入任何浮动面板） */
+/* content.css —— 双语对照译文样式（统一块级段落，不注入任何浮动面板） */
 
-/* 沉浸式双语：译文以独立段落显示在原文下方（块级元素） */
-.dst-block-translation {
+/* 所有译文都用同一套样式：独立成段、带一条虚线上分隔线。
+   不再区分「块级 / 行内」两种写法，避免出现有的带分隔线、有的贴在原文行里。 */
+.dst-translation {
   display: block;
   margin-top: 0.35em;
   padding-top: 0.35em;
@@ -12,20 +13,11 @@
   letter-spacing: inherit;
   text-align: inherit;
   white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
-
-/* 内联元素（按钮、链接等）：译文紧跟原文之后 */
-.dst-inline-translation {
-  display: inline;
-  color: inherit;
-  font: inherit;
-  white-space: pre-wrap;
-}
-.dst-inline-translation::before { content: "\00a0"; }
 
 @media (prefers-color-scheme: dark) {
-  .dst-block-translation {
+  .dst-translation {
     border-top-color: rgba(160, 170, 185, 0.4);
   }
 }
-

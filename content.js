@@ -358,12 +358,15 @@
   }
 
   function buildRecords(nodes) {
-    return nodes.map((node) => {
+    return nodes.map((node, idx) => {
       const original = node.nodeValue;
       return {
+        idx,
         node,
         original,
         segs: splitSegments(original, ITEM_MAX_CHARS).map((text) => ({ text, translated: null })),
+        target: null,
+        group: null,
         inserted: null
       };
     });
@@ -402,33 +405,91 @@
     return rec.segs.some((seg) => seg.translated != null);
   }
 
-  function removeInserted(rec) {
-    if (rec.inserted && rec.inserted.parentNode) rec.inserted.remove();
-    rec.inserted = null;
-  }
-
-  /* 块级容器 → 译文独立成段；内联容器 → 译文紧随其后 */
+  /* 块级容器判定：inline-block 系（按钮、行内块链接等）同样算容器，
+     避免译文被推到很远的外层元素里。 */
   function isBlockLike(el) {
+    if (!el || el.nodeType !== 1) return false;
     const d = getComputedStyle(el).display;
     return d === 'block' || d === 'flex' || d === 'grid' || d === 'list-item' ||
-      d === 'flow-root' || d === 'table' || d === 'table-cell' || d === 'table-caption';
+      d === 'flow-root' || d === 'table' || d === 'table-cell' || d === 'table-caption' ||
+      d === 'inline-block' || d === 'inline-flex' || d === 'inline-grid';
   }
 
-  function insertTranslation(rec, text) {
-    if (rec.inserted && rec.inserted.parentNode) {
-      rec.inserted.textContent = text;
+  /* 译文统一挂在最近的块级容器末尾，同一容器内的多段译文合并成一段。
+     这样双语模式下每处译文的样式与位置完全一致：不会有的带分隔线、有的贴在原文行内。 */
+  function blockTarget(node) {
+    const fallback = node.parentElement;
+    let el = fallback;
+    while (el && el !== document.body && !isBlockLike(el)) el = el.parentElement;
+    return el || fallback || document.body;
+  }
+
+  /* 中日韩等不使用空格分词的语言，合并译文时不补空格 */
+  const TIGHT_LANGS = new Set(['zh', 'zh-TW', 'ja']);
+  let curTargetLang = 'zh';
+  const groups = new Map();   // 块级容器 -> { el, recs: [] }
+
+  function groupSep() {
+    return TIGHT_LANGS.has(curTargetLang) ? '' : ' ';
+  }
+
+  function groupEl(target) {
+    let g = groups.get(target);
+    if (!g) {
+      g = { el: null, recs: [] };
+      groups.set(target, g);
+    }
+    if (!g.el || !g.el.isConnected) {
+      g.el = document.createElement('span');
+      g.el.className = 'dst-translation';
+      g.el.setAttribute('data-dst-translation', '1');
+      target.appendChild(g.el);
+    }
+    return g;
+  }
+
+  function refreshGroup(g) {
+    const parts = g.recs
+      .filter(hasAnyTranslation)
+      .sort((a, b) => a.idx - b.idx)
+      .map((rec) => currentText(rec).trim())
+      .filter(Boolean);
+    if (!parts.length) {
+      if (g.el && g.el.isConnected) g.el.remove();
       return;
     }
-    const parent = rec.node.parentNode;
-    if (!parent) return;
-    const block = isBlockLike(parent);
-    const el = document.createElement('span');
-    el.className = block ? 'dst-block-translation' : 'dst-inline-translation';
-    el.setAttribute('data-dst-translation', '1');
-    el.textContent = text;
-    if (block) parent.appendChild(el);
-    else parent.insertBefore(el, rec.node.nextSibling);
-    rec.inserted = el;
+    if (g.el && g.el.isConnected) g.el.textContent = parts.join(groupSep());
+  }
+
+  function removeInserted(rec) {
+    const g = rec.group;
+    rec.group = null;
+    rec.inserted = null;
+    if (!g) return;
+    const i = g.recs.indexOf(rec);
+    if (i >= 0) g.recs.splice(i, 1);
+    refreshGroup(g);
+  }
+
+  function resetInserted() {
+    for (const g of groups.values()) {
+      if (g.el && g.el.isConnected) g.el.remove();
+    }
+    groups.clear();
+    for (const rec of records) {
+      rec.group = null;
+      rec.inserted = null;
+    }
+  }
+
+  function insertTranslation(rec) {
+    if (!document.contains(rec.node)) return;
+    if (!rec.target || !document.contains(rec.target)) rec.target = blockTarget(rec.node);
+    const g = groupEl(rec.target);
+    if (!g.recs.includes(rec)) g.recs.push(rec);
+    rec.group = g;
+    rec.inserted = g.el;
+    refreshGroup(g);
   }
 
   function applyRec(rec, mode) {
@@ -438,9 +499,9 @@
     }
     const text = currentText(rec);
     if (mode === 'bilingual') {
-      // 沉浸式：原文保持不动，译文插入原文下方
+      // 沉浸式：原文保持不动，译文以统一段落追加到原文所在块级容器末尾
       rec.node.nodeValue = rec.original;
-      if (hasAnyTranslation(rec)) insertTranslation(rec, text);
+      if (hasAnyTranslation(rec)) insertTranslation(rec);
       else removeInserted(rec);
     } else {
       removeInserted(rec);
@@ -449,15 +510,16 @@
   }
 
   function applyAll(mode) {
+    resetInserted();   // 重新分组，切换显示样式后顺序与样式保持一致
     for (const rec of records) {
       try { applyRec(rec, mode); } catch (_) { /* 单个节点失败不影响整体 */ }
     }
   }
 
   function restoreOriginal() {
+    resetInserted();
     for (const rec of records) {
       try {
-        removeInserted(rec);
         if (rec.node) rec.node.nodeValue = rec.original;
       } catch (_) { /* ignore */ }
     }
@@ -543,8 +605,9 @@
     }
 
     // 上一轮译文先还原，避免把译文当成原文再翻一次
-    if (records.length) restoreOriginal();
+    restoreOriginal();   // 内部会先清掉已插入的译文，再把各节点写回原文
     records = [];
+    curTargetLang = settings.targetLang || 'zh';
 
     const nodes = collectNodes({
       skipCode: settings.skipCode !== false,
