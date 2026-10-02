@@ -81,9 +81,9 @@
 
       <div class="grid">
         <div class="field">
-          <label for="chunkChars">每批字符数：<span id="chunkVal">1200</span></label>
-          <input id="chunkChars" type="number" min="300" max="4000" step="100" />
-          <p class="hint">每批发给模型的字符数。太大容易漏翻，太小请求变多。</p>
+          <label for="chunkChars">每批字符数：<span id="chunkVal">3000</span></label>
+          <input id="chunkChars" type="number" min="600" max="8000" step="100" />
+          <p class="hint">每批发给模型的字符数，单批最多 8 段。偏小更稳，偏大更省请求。</p>
         </div>
         <div class="field">
           <label for="concurrency">并发请求数：<span id="concVal">3</span></label>
@@ -95,7 +95,7 @@
       <div class="grid">
         <div class="field">
           <label for="maxSegments">单页最多段落数</label>
-          <input id="maxSegments" type="number" min="100" max="3000" step="100" />
+          <input id="maxSegments" type="number" min="200" max="6000" step="100" />
           <p class="hint">超出后只翻译靠前的部分，避免超长页面耗尽额度。</p>
         </div>
         <div class="field">

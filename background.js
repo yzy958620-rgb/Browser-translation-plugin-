@@ -14,11 +14,11 @@ const DEFAULT_SETTINGS = {
   customPrompt: '',
   // 全文翻译相关
   targetLang: 'zh',
-  pageMode: 'translation',   // translation | bilingual
-  chunkChars: 1200,          // 每批送出的字符数
+  pageMode: 'bilingual',     // bilingual（沉浸式双语）| translation
+  chunkChars: 3000,          // 每批送出的字符数
   concurrency: 3,            // 并发请求数
   skipCode: true,            // 跳过代码块
-  maxSegments: 1200,         // 单页最多翻译的段落数
+  maxSegments: 3000,         // 单页最多翻译的段落数
   // 弹窗单条翻译：源/目标语言（与全文翻译目标语言相互独立）
   popupSourceLang: 'auto',
   popupTargetLang: 'en'
@@ -224,11 +224,13 @@ async function translateBatch(items, targetLang) {
       const arr = extractTranslations(data?.choices?.[0]?.message?.content);
       if (!arr) {
         lastError = 'AI 返回内容无法解析，请重试';
+      } else if (arr.length !== list.length) {
+        // 数量对不上说明漏项，整批作废重试，避免译文错位
+        lastError = `译文数量不匹配（${arr.length}/${list.length}）`;
       } else {
         const out = list.map((_, i) => {
           const v = arr[i];
-          if (typeof v === 'string') return v;
-          return '';
+          return typeof v === 'string' ? v : '';
         });
         return { ok: true, translations: out };
       }

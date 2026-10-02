@@ -31,10 +31,10 @@ const DEFAULTS = {
   customPrompt: '',
   targetLang: 'zh',
   pageMode: 'bilingual',
-  chunkChars: 1200,
+  chunkChars: 3000,
   concurrency: 3,
   skipCode: true,
-  maxSegments: 1200
+  maxSegments: 3000
 };
 
 function setStatus(text, kind = '') {
@@ -65,11 +65,11 @@ async function load() {
 
   fillTargetLang(cfg.targetLang);
   pageModeEl.value = cfg.pageMode === 'bilingual' ? 'bilingual' : 'translation';
-  chunkEl.value = cfg.chunkChars || 1200;
+  chunkEl.value = cfg.chunkChars || 3000;
   chunkValEl.textContent = chunkEl.value;
   concEl.value = cfg.concurrency || 3;
   concValEl.textContent = concEl.value;
-  maxSegEl.value = cfg.maxSegments || 1200;
+  maxSegEl.value = cfg.maxSegments || 3000;
   skipCodeEl.checked = cfg.skipCode !== false;
 }
 
@@ -83,10 +83,10 @@ function collect() {
     customPrompt: customPromptEl.value,
     targetLang: targetLangEl.value,
     pageMode: pageModeEl.value,
-    chunkChars: Number(chunkEl.value) || 1200,
+    chunkChars: Number(chunkEl.value) || 3000,
     concurrency: Math.min(6, Math.max(1, Number(concEl.value) || 3)),
     skipCode: skipCodeEl.checked,
-    maxSegments: Number(maxSegEl.value) || 1200
+    maxSegments: Number(maxSegEl.value) || 3000
   };
 }
 

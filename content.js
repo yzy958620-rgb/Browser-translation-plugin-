@@ -228,8 +228,39 @@
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'TEXTAREA', 'IFRAME',
     'SVG', 'CANVAS', 'SELECT', 'OPTION', 'HEAD', 'TITLE', 'META', 'LINK'
   ]);
-  const ITEM_MAX_CHARS = 700;   // 单个文本超过该长度时按句拆成多段
-  const CHUNK_MAX_ITEMS = 60;   // 单批最多条目数
+  const ITEM_MAX_CHARS = 2000;  // 单个文本超过该长度时按句拆成多段（参考值 2400）
+  const CHUNK_MAX_ITEMS = 8;    // 单批最多条目数：条目过多会让模型丢项错位
+
+  // 译文缓存：相同原文重复翻译（重翻、动态页面）直接复用，省额度
+  const CACHE_LIMIT = 500;
+  const CACHE_TTL = 30 * 60 * 1000;
+  const translationCache = new Map();
+
+  function cacheKey(text, lang) { return `${lang || 'zh'}\n${text}`; }
+
+  function getCached(text, lang) {
+    const key = cacheKey(text, lang);
+    const hit = translationCache.get(key);
+    if (!hit) return null;
+    if (Date.now() - hit.time > CACHE_TTL) {
+      translationCache.delete(key);
+      return null;
+    }
+    // 命中后移到末尾，维持简单的 LRU 顺序
+    translationCache.delete(key);
+    translationCache.set(key, hit);
+    return hit.text;
+  }
+
+  function setCached(text, lang, translated) {
+    const key = cacheKey(text, lang);
+    translationCache.delete(key);
+    translationCache.set(key, { text: translated, time: Date.now() });
+    if (translationCache.size > CACHE_LIMIT) {
+      const oldest = translationCache.keys().next().value;
+      translationCache.delete(oldest);
+    }
+  }
 
   let records = [];             // [{ node, original, segs, wrapper }]
   let pageState = null;         // { chunks, cursor, done, failed, mode, running, targetLang }
@@ -256,7 +287,7 @@
 
   function collectNodes(opts) {
     if (!document.body) return [];
-    const maxCount = Math.max(50, Number(opts.maxSegments) || 1200);
+    const maxCount = Math.max(50, Number(opts.maxSegments) || 3000);
     const found = [];
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
@@ -297,6 +328,33 @@
     }
     if (cur) out.push(cur);
     return out;
+  }
+
+  /* 翻译顺序：视口内的正文先翻（滚动位置附近即时可见），导航/页脚最后 */
+  function contentPriority(el) {
+    if (el.closest('article, main, [role="main"]')) return 0;
+    if (el.closest('nav, aside, header, footer, [role="navigation"]')) return 10;
+    return 5;
+  }
+
+  function sortByPriority(nodes) {
+    const vh = window.innerHeight || 800;
+    const scored = nodes.map((node, index) => {
+      let score = 0;
+      const el = node.parentElement;
+      if (el) {
+        score += contentPriority(el);
+        let offscreen = true;
+        try {
+          const r = el.getBoundingClientRect();
+          if (r) offscreen = r.bottom < 0 || r.top > vh;
+        } catch (_) { /* ignore */ }
+        if (offscreen) score += 10;
+      }
+      return { node, index, score };
+    });
+    scored.sort((a, b) => a.score - b.score || a.index - b.index);
+    return scored.map((item) => item.node);
   }
 
   function buildRecords(nodes) {
@@ -500,36 +558,56 @@
       const index = state.cursor++;
       if (index >= state.chunks.length) return;
       const chunk = state.chunks[index];
-      const texts = chunk.map((it) => it.rec.segs[it.i].text);
+      const lang = settings.targetLang;
 
-      let res = null;
-      try {
-        res = await chrome.runtime.sendMessage({
-          type: 'translateBatch',
-          items: texts,
-          targetLang: settings.targetLang
-        });
-      } catch (_) {
-        res = { ok: false, error: '与后台通信失败' };
+      // 命中缓存的直接回填，剩余部分再交给模型，避免重复消耗额度
+      const pending = [];
+      for (const it of chunk) {
+        const seg = it.rec.segs[it.i];
+        const cached = getCached(seg.text, lang);
+        if (cached != null) seg.translated = cached;
+        else pending.push(it);
       }
 
-      if (res && res.ok && Array.isArray(res.translations)) {
-        res.translations.forEach((val, i) => {
-          const it = chunk[i];
-          if (!it) return;
-          if (typeof val === 'string' && val.trim()) it.rec.segs[it.i].translated = val;
-        });
-        chunk.forEach((it) => applyRec(it.rec, state.mode));
-        state.done++;
-      } else {
-        if (res?.error === 'MISSING_KEY') {
-          state.running = false;
-          state.keyError = true;
-          return;
+      if (pending.length) {
+        const texts = pending.map((it) => it.rec.segs[it.i].text);
+        let res = null;
+        try {
+          res = await chrome.runtime.sendMessage({
+            type: 'translateBatch',
+            items: texts,
+            targetLang: lang
+          });
+        } catch (_) {
+          res = { ok: false, error: '与后台通信失败' };
         }
-        state.failed++;
-        state.lastError = res?.error || '未知错误';
+
+        const aligned = Array.isArray(res?.translations) && res.translations.length === texts.length;
+        if (res?.ok && aligned) {
+          pending.forEach((it, i) => {
+            const val = res.translations[i];
+            if (typeof val === 'string' && val.trim()) {
+              it.rec.segs[it.i].translated = val;
+              setCached(texts[i], lang, val);
+            }
+          });
+          state.done++;
+        } else {
+          if (res?.error === 'MISSING_KEY') {
+            state.running = false;
+            state.keyError = true;
+            return;
+          }
+          state.failed++;
+          // 译文数量不对时整批作废，避免译文错位显示
+          state.lastError = res?.error ||
+            (Array.isArray(res?.translations) ? '译文数量不匹配，已跳过该批' : '未知错误');
+        }
+      } else {
+        state.done++;
       }
+
+      chunk.forEach((it) => applyRec(it.rec, state.mode));
       if (!state.running) return;
       updateUI(state);
     }
@@ -561,8 +639,8 @@
       return;
     }
 
-    records = buildRecords(nodes);
-    const chunks = buildChunks(records, Number(settings.chunkChars) || 1200);
+    records = buildRecords(sortByPriority(nodes));
+    const chunks = buildChunks(records, Number(settings.chunkChars) || 3000);
 
     const state = {
       chunks,
