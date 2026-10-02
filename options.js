@@ -64,7 +64,7 @@ async function load() {
   customPromptEl.value = cfg.customPrompt || '';
 
   fillTargetLang(cfg.targetLang);
-  pageModeEl.value = cfg.pageMode === 'bilingual' ? 'bilingual' : 'translation';
+  pageModeEl.value = cfg.pageMode === 'translation' ? 'translation' : 'bilingual';
   chunkEl.value = cfg.chunkChars || 3000;
   chunkValEl.textContent = chunkEl.value;
   concEl.value = cfg.concurrency || 3;

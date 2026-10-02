@@ -14,7 +14,7 @@ const DEFAULT_SETTINGS = {
   customPrompt: '',
   // 全文翻译相关
   targetLang: 'zh',
-  pageMode: 'bilingual',     // bilingual（沉浸式双语）| translation
+  pageMode: 'bilingual',     // bilingual（沉浸式双语）| translation（只显示译文）
   chunkChars: 3000,          // 每批送出的字符数
   concurrency: 3,            // 并发请求数
   skipCode: true,            // 跳过代码块

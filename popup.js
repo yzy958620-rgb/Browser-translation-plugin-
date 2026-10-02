@@ -19,6 +19,7 @@ const pageBtn = $('#pageBtn');
 const restoreBtn = $('#restoreBtn');
 const sourceLangEl = $('#sourceLang');
 const popupTargetEl = $('#popupTargetLang');
+const pageModeEl = $('#pageMode');
 
 let apiKey = '';
 
@@ -51,7 +52,7 @@ function updateCount() {
 
 async function init() {
   const cfg = await chrome.storage.sync.get({
-    apiKey: '', style: 'natural', targetLang: 'zh',
+    apiKey: '', style: 'natural', targetLang: 'zh', pageMode: 'bilingual',
     popupSourceLang: 'auto', popupTargetLang: 'en'
   });
   apiKey = cfg.apiKey || '';
@@ -59,6 +60,7 @@ async function init() {
   fillLangSelect(targetLangEl, cfg.targetLang, false);
   fillLangSelect(sourceLangEl, cfg.popupSourceLang, true);
   fillLangSelect(popupTargetEl, cfg.popupTargetLang, false);
+  pageModeEl.value = cfg.pageMode === 'translation' ? 'translation' : 'bilingual';
   warnEl.classList.toggle('hidden', !!apiKey);
   updateCount();
   inputEl.focus();
@@ -100,6 +102,19 @@ sourceLangEl.addEventListener('change', () => {
 
 popupTargetEl.addEventListener('change', () => {
   chrome.storage.sync.set({ popupTargetLang: popupTargetEl.value });
+});
+
+/* 切换显示样式：写入设置（下次翻译生效），并即时应用到已翻译的页面 */
+pageModeEl.addEventListener('change', async () => {
+  const mode = pageModeEl.value;
+  chrome.storage.sync.set({ pageMode: mode });
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return;
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: 'setPageMode', mode });
+  } catch (_) {
+    /* 页面未注入脚本（chrome:// 等）时忽略 */
+  }
 });
 
 pageBtn.addEventListener('click', async () => {

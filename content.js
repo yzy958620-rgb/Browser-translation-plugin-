@@ -296,8 +296,8 @@
         const parent = node.parentElement;
         if (!parent) return NodeFilter.FILTER_REJECT;
         if (SKIP_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
-        if (parent.closest('[data-dst-panel]')) return NodeFilter.FILTER_REJECT;
         if (parent.closest('[data-dst-translation]')) return NodeFilter.FILTER_REJECT;
+        if (parent.closest('.zh2en-toast')) return NodeFilter.FILTER_REJECT;
         if (opts.skipCode && parent.closest('code, pre, kbd, samp, var')) return NodeFilter.FILTER_REJECT;
         if (!isVisible(parent)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
@@ -463,92 +463,9 @@
     }
   }
 
-  /* ---------- 控制面板 ---------- */
-
-  let ui = null;
-
-  function ensureUI(targetLang) {
-    if (ui && ui.root.isConnected) {
-      if (targetLang) ui.root.querySelector('.dst-panel__title').textContent = titleText(targetLang);
-      return ui;
-    }
-    const root = document.createElement('div');
-    root.className = 'dst-panel';
-    root.setAttribute('data-dst-panel', '1');
-    root.innerHTML = `
-      <div class="dst-panel__head">
-        <span class="dst-panel__title">${titleText(targetLang)}</span>
-        <button class="dst-panel__close" type="button" title="关闭">×</button>
-      </div>
-      <div class="dst-bar"><div class="dst-bar__fill"></div></div>
-      <div class="dst-panel__meta">
-        <span class="dst-panel__status">准备中…</span>
-        <span class="dst-panel__count"></span>
-      </div>
-      <div class="dst-panel__btns">
-        <button class="dst-btn" type="button" data-mode="translation">译文</button>
-        <button class="dst-btn" type="button" data-mode="bilingual">双语</button>
-        <button class="dst-btn" type="button" data-mode="original">原文</button>
-        <button class="dst-btn dst-btn--ghost" type="button" data-act="stop">停止</button>
-      </div>
-    `;
-    document.body.appendChild(root);
-
-    const fill = root.querySelector('.dst-bar__fill');
-    const statusEl = root.querySelector('.dst-panel__status');
-    const countEl = root.querySelector('.dst-panel__count');
-
-    root.querySelector('.dst-panel__close').addEventListener('click', () => {
-      if (pageState) pageState.running = false;
-      root.remove();
-      ui = null;
-    });
-    root.querySelector('[data-act="stop"]').addEventListener('click', () => {
-      if (pageState) pageState.running = false;
-      updateUI(pageState, '已停止');
-    });
-    root.querySelectorAll('[data-mode]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        if (!pageState) return;
-        pageState.mode = btn.dataset.mode;
-        applyAll(pageState.mode);
-        highlightMode();
-        if (pageState.mode === 'original') updateUI(pageState, '已显示原文');
-      });
-    });
-
-    ui = { root, fill, statusEl, countEl };
-    return ui;
-  }
-
-  function titleText(targetLang) {
-    const map = {
-      'zh': '简体中文', 'zh-TW': '繁體中文', 'en': 'English', 'ja': '日本語',
-      'ko': '한국어', 'fr': 'Français', 'de': 'Deutsch', 'ru': 'Русский',
-      'es': 'Español', 'pt': 'Português', 'it': 'Italiano', 'ar': 'العربية'
-    };
-    return `DeepSeek 全文翻译 → ${map[targetLang] || '简体中文'}`;
-  }
-
-  function highlightMode() {
-    if (!ui || !pageState) return;
-    ui.root.querySelectorAll('[data-mode]').forEach((btn) => {
-      btn.classList.toggle('is-active', btn.dataset.mode === pageState.mode);
-    });
-  }
-
-  function updateUI(state, statusOverride) {
-    if (!ui || !ui.root.isConnected || !state) return;
-    const total = state.chunks.length;
-    const pct = total ? Math.round(((state.done + state.failed) / total) * 100) : 0;
-    ui.fill.style.width = `${pct}%`;
-    ui.countEl.textContent = `${state.done + state.failed}/${total}`;
-    if (statusOverride) ui.statusEl.textContent = statusOverride;
-    else if (state.running) ui.statusEl.textContent = `翻译中 ${pct}%`;
-    else ui.statusEl.textContent = state.failed ? `完成（${state.failed} 批失败）` : `已完成 ${state.done} 批`;
-    ui.fill.classList.toggle('is-error', !state.running && state.failed > 0 && state.done === 0);
-    ui.fill.classList.toggle('is-done', !state.running && state.done > 0);
-    highlightMode();
+  /* 显示模式归一化：bilingual（沉浸式双语）| translation（只显示译文）| original（保持原文） */
+  function normalizeMode(mode) {
+    return (mode === 'translation' || mode === 'original') ? mode : 'bilingual';
   }
 
   /* ---------- 主流程 ---------- */
@@ -609,7 +526,6 @@
 
       chunk.forEach((it) => applyRec(it.rec, state.mode));
       if (!state.running) return;
-      updateUI(state);
     }
   }
 
@@ -648,14 +564,14 @@
       done: 0,
       failed: 0,
       running: true,
-      mode: settings.pageMode === 'translation' ? 'translation' : 'bilingual',
+      mode: normalizeMode(settings.pageMode),
       keyError: false,
       lastError: ''
     };
     pageState = state;
 
-    ensureUI(settings.targetLang);
-    updateUI(state, '开始翻译…');
+    // 不再弹出悬浮面板，只用一条自动消失的提示条；翻译期间可随时用快捷键还原
+    showToast({ text: '开始翻译，请稍候…（Alt+Shift+R 可还原）', level: 'info' });
 
     const concurrency = Math.min(6, Math.max(1, Number(settings.concurrency) || 3));
     const workers = [];
@@ -666,7 +582,6 @@
     await Promise.all(workers);
 
     if (state.keyError) {
-      updateUI(state, '未配置 API Key');
       showToast({ text: '未配置 DeepSeek API Key', level: 'error' });
       chrome.runtime.sendMessage({ type: 'openOptions' }).catch(() => {});
       return;
@@ -674,11 +589,12 @@
 
     state.running = false;
     applyAll(state.mode);
-    updateUI(state);
     if (state.failed && state.done === 0) {
       showToast({ text: `翻译失败：${state.lastError}`, level: 'error' });
     } else if (state.failed) {
       showToast({ text: `完成，但有 ${state.failed} 批失败（${state.lastError}）`, level: 'warn' });
+    } else if (state.mode === 'original') {
+      showToast({ text: `已翻译 ${records.length} 段，当前保持原文显示（弹窗或设置里可切换显示样式）`, level: 'success' });
     } else {
       showToast({ text: `已翻译 ${records.length} 段（快捷键 Alt+Shift+R 还原）`, level: 'success' });
     }
@@ -689,7 +605,6 @@
     pageState = null;
     restoreOriginal();
     records = [];
-    if (ui) { ui.root.remove(); ui = null; }
   }
 
   /* 快捷键页面级兜底：即使 Chrome commands 失效（焦点异常、冲突等），
@@ -739,6 +654,14 @@
         stopAndRestore();
         showToast({ text: '已恢复原文', level: 'success' });
         sendResponse({ ok: true });
+        break;
+      case 'setPageMode':
+        // 弹窗 / 设置页切换显示样式：不重新翻译，直接复用已有译文
+        if (pageState) {
+          pageState.mode = normalizeMode(msg.mode);
+          applyAll(pageState.mode);
+        }
+        sendResponse({ ok: !!pageState, mode: pageState ? pageState.mode : normalizeMode(msg.mode) });
         break;
       case 'replaceSelection': {
         const sel = window.getSelection();

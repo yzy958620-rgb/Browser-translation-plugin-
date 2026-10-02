@@ -183,13 +183,6 @@ button.primary-btn, button.ghost-btn, button.soft-btn {
 
 .hidden { display: none !important; }
 
-.hint-text {
-  flex: 1;
-  font-size: 11px;
-  color: var(--muted);
-  text-align: right;
-}
-
 .lang-row { margin-top: 2px; }
 .lang-row select { min-width: 0; }
 .lang-arrow {

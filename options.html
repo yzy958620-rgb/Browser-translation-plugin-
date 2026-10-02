@@ -16,6 +16,8 @@
     </header>
 
     <section class="card">
+      <h2 class="sec-title">基本设置</h2>
+
       <div class="field">
         <label for="apiKey">DeepSeek API Key</label>
         <div class="key-row">
@@ -49,6 +51,21 @@
         </div>
       </div>
 
+      <div class="grid">
+        <div class="field">
+          <label for="targetLang">全文翻译目标语言</label>
+          <select id="targetLang"></select>
+        </div>
+        <div class="field">
+          <label for="pageMode">显示样式</label>
+          <select id="pageMode">
+            <option value="bilingual">双语对照（译文显示在原文下方，沉浸式）</option>
+            <option value="translation">只显示译文（覆盖原文）</option>
+          </select>
+          <p class="hint">右键 / 快捷键 / 弹窗触发的全文翻译都按这里设置显示，翻译后也可在扩展弹窗里随时切换。</p>
+        </div>
+      </div>
+
       <div class="field">
         <label for="temperature">创造性（temperature）：<span id="tempVal">0.3</span></label>
         <input id="temperature" type="range" min="0" max="1" step="0.1" value="0.3" />
@@ -64,20 +81,6 @@
         <a href="#" id="shortcutsLink">chrome://extensions/shortcuts</a>
         修改「DeepSeek AI 翻译助手」的快捷键。即使快捷键失效，也可用右键菜单或扩展弹窗触发。
       </p>
-
-      <div class="grid">
-        <div class="field">
-          <label for="targetLang">目标语言</label>
-          <select id="targetLang"></select>
-        </div>
-        <div class="field">
-          <label for="pageMode">页面默认显示</label>
-          <select id="pageMode">
-            <option value="bilingual">双语对照（译文显示在原文下方，沉浸式）</option>
-            <option value="translation">只显示译文（覆盖原文）</option>
-          </select>
-        </div>
-      </div>
 
       <div class="grid">
         <div class="field">
