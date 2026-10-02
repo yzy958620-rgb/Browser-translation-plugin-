@@ -14,8 +14,22 @@ const clearBtn = $('#clearBtn');
 const settingsBtn = $('#settingsBtn');
 const warnEl = $('#warn');
 const warnBtn = $('#warnBtn');
+const targetLangEl = $('#targetLang');
+const pageBtn = $('#pageBtn');
+const restoreBtn = $('#restoreBtn');
 
 let apiKey = '';
+
+function fillTargetLang(current) {
+  targetLangEl.innerHTML = '';
+  Object.keys(LANGUAGES).forEach((code) => {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = LANGUAGES[code];
+    targetLangEl.appendChild(opt);
+  });
+  targetLangEl.value = LANGUAGES[current] ? current : 'zh';
+}
 
 function setStatus(text, kind = '') {
   statusEl.textContent = text || '';
@@ -27,9 +41,10 @@ function updateCount() {
 }
 
 async function init() {
-  const cfg = await chrome.storage.sync.get({ apiKey: '', style: 'natural' });
+  const cfg = await chrome.storage.sync.get({ apiKey: '', style: 'natural', targetLang: 'zh' });
   apiKey = cfg.apiKey || '';
   if (cfg.style) styleEl.value = cfg.style;
+  fillTargetLang(cfg.targetLang);
   warnEl.classList.toggle('hidden', !!apiKey);
   updateCount();
   inputEl.focus();
@@ -59,6 +74,46 @@ warnBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
 
 styleEl.addEventListener('change', () => {
   chrome.storage.sync.set({ style: styleEl.value });
+});
+
+targetLangEl.addEventListener('change', () => {
+  chrome.storage.sync.set({ targetLang: targetLangEl.value });
+});
+
+pageBtn.addEventListener('click', async () => {
+  if (!apiKey) {
+    setStatus('请先配置 API Key', 'error');
+    warnEl.classList.remove('hidden');
+    return;
+  }
+  await chrome.storage.sync.set({ targetLang: targetLangEl.value });
+  pageBtn.disabled = true;
+  pageBtn.textContent = '启动中…';
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'pageTranslate' });
+    if (res?.ok) {
+      window.close();
+      return;
+    }
+    if (res?.reason === 'MISSING_KEY') {
+      setStatus('请先配置 API Key', 'error');
+      chrome.runtime.openOptionsPage();
+      return;
+    }
+    setStatus(res?.error || '翻译失败', 'error');
+  } catch (err) {
+    setStatus(err?.message || '翻译失败', 'error');
+  } finally {
+    pageBtn.disabled = false;
+    pageBtn.textContent = '翻译此页';
+  }
+});
+
+restoreBtn.addEventListener('click', async () => {
+  try {
+    await chrome.runtime.sendMessage({ type: 'restorePage' });
+  } catch (_) { /* ignore */ }
+  window.close();
 });
 
 async function runTranslate() {

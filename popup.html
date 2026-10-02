@@ -2,17 +2,17 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>中译英 AI 助手</title>
+  <title>DeepSeek AI 翻译助手</title>
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
   <div class="app">
     <header class="header">
       <div class="brand">
-        <span class="logo">中<span class="arrow">→</span>A</span>
+        <span class="logo">译<span class="arrow">AI</span></span>
         <div class="titles">
-          <div class="title">中译英 AI 助手</div>
-          <div class="subtitle">DeepSeek 驱动</div>
+          <div class="title">DeepSeek AI 翻译助手</div>
+          <div class="subtitle">全文翻译 · 选中翻译</div>
         </div>
       </div>
       <button id="settingsBtn" class="icon-btn" title="设置">⚙</button>
@@ -24,6 +24,21 @@
     </div>
 
     <main class="main">
+      <section class="card">
+        <div class="card-head">
+          <label for="targetLang">全文翻译当前网页</label>
+          <span class="count">Alt+Shift+T</span>
+        </div>
+        <div class="actions">
+          <select id="targetLang" title="目标语言"></select>
+          <button id="pageBtn" class="primary-btn">翻译此页</button>
+        </div>
+        <div class="actions">
+          <button id="restoreBtn" class="ghost-btn">恢复原文</button>
+          <span class="hint-text">页面右上角可切换 译文 / 双语 / 原文</span>
+        </div>
+      </section>
+
       <section class="card">
         <div class="card-head">
           <label for="input">中文输入</label>
@@ -57,9 +72,11 @@
     </main>
 
     <footer class="footer">
-      选中网页文字 → 右键「用 AI 翻译为英文」可直接替换 · 快捷键 Alt+Shift+T
+      右键页面 →「DeepSeek 全文翻译此页」· 选中文字右键 →「用 AI 翻译为英文」<br />
+      全文翻译 Alt+Shift+T · 选中翻译 Alt+Shift+S · 恢复原文 Alt+Shift+R
     </footer>
   </div>
+  <script src="langs.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

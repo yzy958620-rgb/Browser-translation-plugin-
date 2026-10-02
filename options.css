@@ -65,6 +65,23 @@ header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
   margin-bottom: 16px;
 }
 
+.sec-title {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: .3px;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  margin-bottom: 0;
+}
+.check-row input { width: 16px; height: 16px; accent-color: var(--primary); }
+
 .field { margin-bottom: 16px; }
 .field:last-child { margin-bottom: 0; }
 

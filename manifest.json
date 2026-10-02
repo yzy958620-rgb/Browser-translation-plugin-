@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "中译英 AI 助手",
-  "version": "1.0.0",
-  "description": "输入中文，调用 DeepSeek AI 转化为地道英文；支持一键填入网页输入框、右键选中直接替换。",
+  "name": "DeepSeek AI 翻译助手",
+  "version": "2.0.0",
+  "description": "用 DeepSeek 一键全文翻译网页，或即时翻译选中的文字；支持双语对照与原文还原。快捷键 / 右键菜单均可触发。",
   "permissions": ["storage", "contextMenus", "activeTab", "scripting"],
   "host_permissions": ["https://api.deepseek.com/*"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "中译英 AI 助手",
+    "default_title": "DeepSeek AI 翻译助手",
     "default_popup": "popup.html"
   },
   "options_ui": {
@@ -20,14 +20,23 @@
     {
       "matches": ["http://*/*", "https://*/*", "file://*/*"],
       "js": ["content.js"],
+      "css": ["content.css"],
       "run_at": "document_idle",
       "all_frames": false
     }
   ],
   "commands": {
+    "translate-page": {
+      "suggested_key": { "default": "Alt+Shift+T", "mac": "Alt+Shift+T" },
+      "description": "全文翻译当前网页"
+    },
     "translate-selection": {
-      "suggested_key": { "default": "Alt+Shift+T" },
-      "description": "把选中的中文翻译为英文"
+      "suggested_key": { "default": "Alt+Shift+S", "mac": "Alt+Shift+S" },
+      "description": "翻译选中的文字"
+    },
+    "restore-page": {
+      "suggested_key": { "default": "Alt+Shift+R", "mac": "Alt+Shift+R" },
+      "description": "恢复网页原文"
     }
   },
   "icons": {

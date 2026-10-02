@@ -2,16 +2,16 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>设置 · 中译英 AI 助手</title>
+  <title>设置 · DeepSeek AI 翻译助手</title>
   <link rel="stylesheet" href="options.css" />
 </head>
 <body>
   <div class="wrap">
     <header>
-      <span class="logo">中<span class="arrow">→</span>A</span>
+      <span class="logo">译<span class="arrow">AI</span></span>
       <div>
-        <h1>中译英 AI 助手</h1>
-        <p>使用 DeepSeek 将中文转化为地道英文</p>
+        <h1>DeepSeek AI 翻译助手</h1>
+        <p>全文翻译网页 · 翻译选中文字</p>
       </div>
     </header>
 
@@ -57,6 +57,53 @@
     </section>
 
     <section class="card">
+      <h2 class="sec-title">全文翻译</h2>
+
+      <div class="grid">
+        <div class="field">
+          <label for="targetLang">目标语言</label>
+          <select id="targetLang"></select>
+        </div>
+        <div class="field">
+          <label for="pageMode">页面默认显示</label>
+          <select id="pageMode">
+            <option value="translation">只显示译文</option>
+            <option value="bilingual">双语对照（译文中括号显示原文）</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="field">
+          <label for="chunkChars">每批字符数：<span id="chunkVal">1200</span></label>
+          <input id="chunkChars" type="number" min="300" max="4000" step="100" />
+          <p class="hint">每批发给模型的字符数。太大容易漏翻，太小请求变多。</p>
+        </div>
+        <div class="field">
+          <label for="concurrency">并发请求数：<span id="concVal">3</span></label>
+          <input id="concurrency" type="number" min="1" max="6" step="1" />
+          <p class="hint">同时发出的请求数，越大越快，但更容易触发限流。</p>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="field">
+          <label for="maxSegments">单页最多段落数</label>
+          <input id="maxSegments" type="number" min="100" max="3000" step="100" />
+          <p class="hint">超出后只翻译靠前的部分，避免超长页面耗尽额度。</p>
+        </div>
+        <div class="field">
+          <label class="check-row">
+            <input id="skipCode" type="checkbox" />
+            跳过代码块（code / pre）
+          </label>
+          <p class="hint">技术文档建议开启，避免破坏示例代码。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="sec-title">选中文字翻译</h2>
       <div class="field">
         <label for="glossary">术语表（可选）</label>
         <textarea id="glossary" rows="4" placeholder="每行一条，格式：中文 -> English&#10;例如：&#10;大模型 -> large language model&#10;供应链 -> supply chain"></textarea>
@@ -77,6 +124,7 @@
       </div>
     </div>
   </div>
+  <script src="langs.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

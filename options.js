@@ -13,6 +13,14 @@ const statusEl = $('#status');
 const saveBtn = $('#saveBtn');
 const testBtn = $('#testBtn');
 const toggleKeyBtn = $('#toggleKey');
+const targetLangEl = $('#targetLang');
+const pageModeEl = $('#pageMode');
+const chunkEl = $('#chunkChars');
+const chunkValEl = $('#chunkVal');
+const concEl = $('#concurrency');
+const concValEl = $('#concVal');
+const maxSegEl = $('#maxSegments');
+const skipCodeEl = $('#skipCode');
 
 const DEFAULTS = {
   apiKey: '',
@@ -20,12 +28,29 @@ const DEFAULTS = {
   temperature: 0.3,
   style: 'natural',
   glossary: '',
-  customPrompt: ''
+  customPrompt: '',
+  targetLang: 'zh',
+  pageMode: 'translation',
+  chunkChars: 1200,
+  concurrency: 3,
+  skipCode: true,
+  maxSegments: 1200
 };
 
 function setStatus(text, kind = '') {
   statusEl.textContent = text || '';
   statusEl.className = 'status' + (kind ? ` ${kind}` : '');
+}
+
+function fillTargetLang(current) {
+  targetLangEl.innerHTML = '';
+  Object.keys(LANGUAGES).forEach((code) => {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = LANGUAGES[code];
+    targetLangEl.appendChild(opt);
+  });
+  targetLangEl.value = LANGUAGES[current] ? current : 'zh';
 }
 
 async function load() {
@@ -37,6 +62,15 @@ async function load() {
   tempValEl.textContent = tempEl.value;
   glossaryEl.value = cfg.glossary || '';
   customPromptEl.value = cfg.customPrompt || '';
+
+  fillTargetLang(cfg.targetLang);
+  pageModeEl.value = cfg.pageMode === 'bilingual' ? 'bilingual' : 'translation';
+  chunkEl.value = cfg.chunkChars || 1200;
+  chunkValEl.textContent = chunkEl.value;
+  concEl.value = cfg.concurrency || 3;
+  concValEl.textContent = concEl.value;
+  maxSegEl.value = cfg.maxSegments || 1200;
+  skipCodeEl.checked = cfg.skipCode !== false;
 }
 
 function collect() {
@@ -46,12 +80,26 @@ function collect() {
     style: styleEl.value,
     temperature: Number(tempEl.value),
     glossary: glossaryEl.value,
-    customPrompt: customPromptEl.value
+    customPrompt: customPromptEl.value,
+    targetLang: targetLangEl.value,
+    pageMode: pageModeEl.value,
+    chunkChars: Number(chunkEl.value) || 1200,
+    concurrency: Math.min(6, Math.max(1, Number(concEl.value) || 3)),
+    skipCode: skipCodeEl.checked,
+    maxSegments: Number(maxSegEl.value) || 1200
   };
 }
 
 tempEl.addEventListener('input', () => {
   tempValEl.textContent = tempEl.value;
+});
+
+chunkEl.addEventListener('input', () => {
+  chunkValEl.textContent = chunkEl.value;
+});
+
+concEl.addEventListener('input', () => {
+  concValEl.textContent = concEl.value;
 });
 
 toggleKeyBtn.addEventListener('click', () => {

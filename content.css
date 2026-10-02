@@ -1,0 +1,121 @@
+/* content.css —— 全文翻译面板与双语标记 */
+
+.dst-panel {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2147483646;
+  width: 268px;
+  padding: 12px 14px 14px;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #1f2937;
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  user-select: none;
+}
+
+.dst-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.dst-panel__title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dst-panel__close {
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.dst-panel__close:hover { background: #f3f4f6; color: #111827; }
+
+.dst-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.dst-bar__fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2563eb, #4f46e5);
+  transition: width .25s ease;
+}
+
+.dst-bar__fill.is-error { background: #dc2626; }
+.dst-bar__fill.is-done { background: #16a34a; }
+
+.dst-panel__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 10px;
+}
+
+.dst-panel__btns {
+  display: flex;
+  gap: 6px;
+}
+
+.dst-btn {
+  flex: 1;
+  padding: 6px 4px;
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+
+.dst-btn:hover { background: #f9fafb; }
+
+.dst-btn.is-active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.dst-btn--ghost {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.dst-btn--ghost:hover { background: #fef2f2; }
+
+/* 双语模式：原文弱化显示在译文之后 */
+.dst-wrap { display: inline; }
+.dst-wrap .dst-orig {
+  display: inline;
+  color: #6b7280;
+  opacity: .75;
+  font-size: .92em;
+  text-decoration: none;
+}
+.dst-wrap .dst-orig::before { content: "（"; }
+.dst-wrap .dst-orig::after { content: "）"; }
