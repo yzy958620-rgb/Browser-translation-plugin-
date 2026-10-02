@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>中译英 AI 助手</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="brand">
+        <span class="logo">中<span class="arrow">→</span>A</span>
+        <div class="titles">
+          <div class="title">中译英 AI 助手</div>
+          <div class="subtitle">DeepSeek 驱动</div>
+        </div>
+      </div>
+      <button id="settingsBtn" class="icon-btn" title="设置">⚙</button>
+    </header>
+
+    <div id="warn" class="warn hidden">
+      <span>尚未配置 DeepSeek API Key</span>
+      <button id="warnBtn" class="link-btn">去设置</button>
+    </div>
+
+    <main class="main">
+      <section class="card">
+        <div class="card-head">
+          <label for="input">中文输入</label>
+          <span id="count" class="count">0</span>
+        </div>
+        <textarea id="input" rows="5" placeholder="输入中文…（Ctrl + Enter 翻译）"></textarea>
+        <div class="actions">
+          <select id="style" title="译文风格">
+            <option value="natural">自然日常</option>
+            <option value="formal">商务正式</option>
+            <option value="academic">学术严谨</option>
+            <option value="casual">简短口语</option>
+            <option value="email">礼貌邮件</option>
+          </select>
+          <button id="clearBtn" class="ghost-btn" title="清空">清空</button>
+          <button id="translateBtn" class="primary-btn">翻译</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <label for="output">英文结果</label>
+          <span id="status" class="status"></span>
+        </div>
+        <textarea id="output" rows="5" placeholder="翻译结果会出现在这里…"></textarea>
+        <div class="actions">
+          <button id="copyBtn" class="ghost-btn">复制</button>
+          <button id="insertBtn" class="soft-btn" title="填入当前网页里正在编辑的输入框">填入网页输入框</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      选中网页文字 → 右键「用 AI 翻译为英文」可直接替换 · 快捷键 Alt+Shift+T
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

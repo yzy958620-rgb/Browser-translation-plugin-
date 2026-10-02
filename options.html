@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>设置 · 中译英 AI 助手</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <span class="logo">中<span class="arrow">→</span>A</span>
+      <div>
+        <h1>中译英 AI 助手</h1>
+        <p>使用 DeepSeek 将中文转化为地道英文</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="field">
+        <label for="apiKey">DeepSeek API Key</label>
+        <div class="key-row">
+          <input id="apiKey" type="password" placeholder="sk-xxxxxxxxxxxxxxxx" autocomplete="off" />
+          <button id="toggleKey" class="mini-btn" type="button">显示</button>
+        </div>
+        <p class="hint">
+          还没有 Key？前往
+          <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer">platform.deepseek.com/api_keys</a>
+          创建。Key 仅保存在本机浏览器中。
+        </p>
+      </div>
+
+      <div class="grid">
+        <div class="field">
+          <label for="model">模型</label>
+          <select id="model">
+            <option value="deepseek-chat">deepseek-chat（快速，推荐）</option>
+            <option value="deepseek-reasoner">deepseek-reasoner（推理更强，较慢）</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="style">默认风格</label>
+          <select id="style">
+            <option value="natural">自然日常</option>
+            <option value="formal">商务正式</option>
+            <option value="academic">学术严谨</option>
+            <option value="casual">简短口语</option>
+            <option value="email">礼貌邮件</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="temperature">创造性（temperature）：<span id="tempVal">0.3</span></label>
+        <input id="temperature" type="range" min="0" max="1" step="0.1" value="0.3" />
+        <p class="hint">翻译场景建议 0.1 ~ 0.4，数值越低越稳定。</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="field">
+        <label for="glossary">术语表（可选）</label>
+        <textarea id="glossary" rows="4" placeholder="每行一条，格式：中文 -> English&#10;例如：&#10;大模型 -> large language model&#10;供应链 -> supply chain"></textarea>
+        <p class="hint">保证专有名词、产品名、术语翻译一致。</p>
+      </div>
+
+      <div class="field">
+        <label for="customPrompt">自定义系统提示词（可选）</label>
+        <textarea id="customPrompt" rows="4" placeholder="留空则使用内置翻译提示词。填写后将完全覆盖内置提示词。"></textarea>
+      </div>
+    </section>
+
+    <div class="bar">
+      <span id="status" class="status"></span>
+      <div class="bar-right">
+        <button id="testBtn" class="ghost-btn" type="button">测试连接</button>
+        <button id="saveBtn" class="primary-btn" type="button">保存设置</button>
+      </div>
+    </div>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
