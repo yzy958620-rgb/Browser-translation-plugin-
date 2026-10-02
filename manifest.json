@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "DeepSeek AI 翻译助手",
+  "name": "浏览器翻译插件",
   "version": "4.1.0",
-  "description": "用 DeepSeek 一键全文翻译网页，或即时翻译选中的文字；支持双语对照与原文还原。快捷键 / 右键菜单均可触发。",
+  "description": "浏览器翻译插件：一键全文翻译网页，或即时翻译选中的文字；支持双语对照与原文还原。快捷键 / 右键菜单均可触发。",
   "permissions": ["storage", "contextMenus", "activeTab", "scripting"],
   "host_permissions": ["https://api.deepseek.com/*"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "DeepSeek AI 翻译助手",
+    "default_title": "浏览器翻译插件",
     "default_popup": "popup.html"
   },
   "options_ui": {
