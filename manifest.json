@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "浏览器翻译插件",
-  "version": "4.3.0",
+  "version": "4.3.1",
   "description": "浏览器翻译插件：一键全文翻译网页，或即时翻译选中的文字；支持双语对照与原文还原。快捷键 / 右键菜单均可触发。",
   "permissions": ["storage", "contextMenus", "activeTab", "scripting"],
   "host_permissions": ["https://api.deepseek.com/*"],
