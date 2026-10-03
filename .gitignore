@@ -1,0 +1,44 @@
+# ---------- 密钥与本地私密配置 ----------
+# DeepSeek API Key 只应保存在 chrome.storage 中，任何形式的密钥文件都不许入库
+.env
+.env.*
+*.env.local
+*.local.js
+secrets*.json
+
+# ---------- 依赖与构建产物 ----------
+# 本项目是免构建的纯 JS 扩展，以下为以后可能引入打包工具时的兜底
+# 注意：package-lock.json 等锁文件应当提交，故不在此忽略
+node_modules/
+dist/
+build/
+
+# ---------- 扩展打包产物（含私钥，绝不可入库）----------
+*.zip
+*.crx
+*.pem
+*.key
+
+# ---------- 编辑器 / IDE ----------
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-*
+
+# ---------- 系统垃圾 ----------
+.DS_Store
+.AppleDouble
+Thumbs.db
+desktop.ini
+
+# ---------- CodeBuddy 工作区数据 ----------
+.codebuddy/
+
+# ---------- 临时与备份文件 ----------
+*~
+*.swp
+*.swo
+*.bak
+*.orig
+*.rej
+*.tmp
