@@ -1,26 +1,26 @@
 {
   "manifest_version": 3,
   "name": "浏览器翻译插件",
-  "version": "4.3.1",
+  "version": "4.4.0",
   "description": "浏览器翻译插件：一键全文翻译网页，或即时翻译选中的文字；支持双语对照与原文还原。快捷键 / 右键菜单均可触发。",
   "permissions": ["storage", "contextMenus", "activeTab", "scripting"],
   "host_permissions": ["https://api.deepseek.com/*"],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background/background.js"
   },
   "action": {
     "default_title": "浏览器翻译插件",
-    "default_popup": "popup.html"
+    "default_popup": "ui/popup.html"
   },
   "options_ui": {
-    "page": "options.html",
+    "page": "ui/options.html",
     "open_in_tab": true
   },
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*", "file://*/*"],
-      "js": ["content.js"],
-      "css": ["content.css"],
+      "js": ["shared/langs.js", "content/content.js"],
+      "css": ["content/content.css"],
       "run_at": "document_idle",
       "all_frames": false
     }

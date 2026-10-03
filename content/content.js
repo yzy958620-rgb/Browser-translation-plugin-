@@ -1,8 +1,9 @@
-/* content.js —— 与网页交互：读取选区、替换选区、插入输入框、提示条 */
+/* content.js —— 网页侧全部逻辑：选区/输入框读写、提示条、段落采集与全文翻译调度
+   依赖 langs.js（TIGHT_LANGS / RTL_LANGS），由 manifest 与它一起注入。 */
 
 (() => {
-  if (window.__zh2enLoaded) return;
-  window.__zh2enLoaded = true;
+  if (window.__dstLoaded) return;
+  window.__dstLoaded = true;
 
   let lastEditable = null;
   let lastState = null; // { focusEl, start, end }
@@ -37,6 +38,7 @@
   let toastTimer = null;
 
   function showToast({ text, level = 'info', sticky = false, undoText }) {
+    if (!document.body) return;   // 极少数文档（XML / 内嵌视图）没有 body
     hideToast();
     const colors = {
       info: '#2563eb',
@@ -45,7 +47,7 @@
       error: '#dc2626'
     };
     toastEl = document.createElement('div');
-    toastEl.className = 'zh2en-toast';
+    toastEl.className = 'dst-toast';
     toastEl.style.cssText = `
       position: fixed; top: 16px; right: 16px; z-index: 2147483647;
       max-width: 380px; padding: 10px 14px; border-radius: 10px;
@@ -63,7 +65,7 @@
       btn.textContent = '撤销';
       btn.style.cssText = 'background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.5); color:#fff; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:12px;';
       btn.addEventListener('click', () => {
-        undoReplace(undoText);
+        undoReplace();
         hideToast();
       });
       toastEl.appendChild(btn);
@@ -309,10 +311,9 @@
       if (!parent) return false;
       if (SKIP_TAGS.has(parent.tagName)) return false;
       if (parent.closest('[data-dst-translation]')) return false;
-      if (parent.closest('.zh2en-toast')) return false;
+      if (parent.closest('.dst-toast')) return false;
       if (opts.skipCode && parent.closest('code, pre, kbd, samp, var')) return false;
       if (!isVisible(parent)) return false;
-      if (seenNodes.has(node)) return false;
       return true;
     };
   }
@@ -393,8 +394,7 @@
         original,
         segs: splitSegments(original, ITEM_MAX_CHARS).map((text) => ({ text, translated: null })),
         target: null,
-        group: null,
-        inserted: null
+        group: null
       };
     });
   }
@@ -507,10 +507,7 @@
     return el || fallback || document.body;
   }
 
-  /* 中日韩等不使用空格分词的语言，合并译文时不补空格 */
-  const TIGHT_LANGS = new Set(['zh', 'zh-TW', 'yue', 'ja']);
-  /* 从右向左书写的语言：译文段落交给浏览器自动排版 */
-  const RTL_LANGS = new Set(['ar', 'he', 'fa', 'ur']);
+  /* 合并译文时的空格策略与 RTL 排版依赖 langs.js 的 TIGHT_LANGS / RTL_LANGS */
   let curTargetLang = 'zh';
   const groups = new Map();   // 块级容器 -> { el, recs: [] }
 
@@ -550,7 +547,6 @@
   function removeInserted(rec) {
     const g = rec.group;
     rec.group = null;
-    rec.inserted = null;
     if (!g) return;
     const i = g.recs.indexOf(rec);
     if (i >= 0) g.recs.splice(i, 1);
@@ -562,10 +558,7 @@
       if (g.el && g.el.isConnected) g.el.remove();
     }
     groups.clear();
-    for (const rec of records) {
-      rec.group = null;
-      rec.inserted = null;
-    }
+    for (const rec of records) rec.group = null;
   }
 
   function insertTranslation(rec) {
@@ -574,7 +567,6 @@
     const g = groupEl(rec.target);
     if (!g.recs.includes(rec)) g.recs.push(rec);
     rec.group = g;
-    rec.inserted = g.el;
     refreshGroup(g);
   }
 
@@ -667,6 +659,12 @@
         state.running = false;
         state.keyError = true;
         state.lastError = res?.error === 'MISSING_KEY' ? '' : (res?.error || '');
+        // 本批里命中缓存的段落照样要落到页面上，不能白扫一遍
+        if (state.alive) {
+          batch.forEach((it) => {
+            try { applyRec(it.rec, state.mode); } catch (_) { /* 单个节点失败不影响整体 */ }
+          });
+        }
         return;
       }
 
@@ -682,7 +680,6 @@
             missed.push(it);       // 这一条模型没给译文，稍后自动重试
           }
         });
-        state.done++;
       } else {
         // 整批失败（网络 / 限流 / 返回格式异常）：整批放回队列重试，不能默默丢掉
         missed.push(...pending);
@@ -691,8 +688,6 @@
       if (missed.length) {
         await requeueFailed(state, missed, state.lastError || '部分段落未翻出来，稍后自动重试');
       }
-    } else {
-      state.done++;
     }
 
     if (!state.alive) return;   // 期间被“恢复原文”了，不要再往回写译文
@@ -795,7 +790,7 @@
         if (m.type === 'attributes') { attrChanged = true; continue; }
         for (const n of m.addedNodes) {
           const el = n.nodeType === 1 ? n : n.parentElement;
-          if (el && el.closest && el.closest('[data-dst-translation], .zh2en-toast')) continue;
+          if (el && el.closest && el.closest('[data-dst-translation], .dst-toast')) continue;
           childAdded = true;
           break;
         }
@@ -855,7 +850,6 @@
       targetLang: settings.targetLang,
       sourceLang: settings.pageSourceLang || 'auto',
       mode: normalizeMode(settings.pageMode),
-      done: 0,
       failed: 0,
       running: false,
       pumping: false,
@@ -888,7 +882,7 @@
 
   /* 快捷键页面级兜底：即使 Chrome commands 失效（焦点异常、冲突等），
      只要页面获得焦点就能触发；由 background 统一节流防止双触发。
-     注意 Ctrl+T 是浏览器保留快捷键（新建标签页），仍会优先打开新标签页。 */
+     Ctrl+T 这类浏览器保留快捷键不会送到页面，这里不做无用兜底。 */
   document.addEventListener('keydown', (e) => {
     if (e.defaultPrevented || !e.isTrusted) return;
     const k = (e.key || '').toLowerCase();
@@ -896,8 +890,7 @@
     const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
 
     let action = null;
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && k === 't') action = 'page';
-    else if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey) {
       if (k === 't') action = 'page';
       else if (k === 'r') action = 'restore';
       else if (k === 's') action = 'selection';
@@ -965,10 +958,6 @@
       case 'copyText':
         copyText(msg.text).then(sendResponse);
         return true;
-      case 'undo':
-        undoReplace();
-        sendResponse({ ok: true });
-        break;
       case 'toast':
         showToast(msg);
         sendResponse({ ok: true });

@@ -1,6 +1,5 @@
-/* options.js —— 设置页 */
-
-const $ = (sel) => document.querySelector(sel);
+/* options.js —— 设置页
+   $ / DEFAULT_SETTINGS / LANGUAGES 来自 common.js、langs.js（在 options.html 里先加载） */
 
 const apiKeyEl = $('#apiKey');
 const modelEl = $('#model');
@@ -22,22 +21,6 @@ const concEl = $('#concurrency');
 const concValEl = $('#concVal');
 const maxSegEl = $('#maxSegments');
 const skipCodeEl = $('#skipCode');
-
-const DEFAULTS = {
-  apiKey: '',
-  model: 'deepseek-chat',
-  temperature: 0.3,
-  style: 'natural',
-  glossary: '',
-  customPrompt: '',
-  targetLang: 'zh',
-  pageSourceLang: 'auto',
-  pageMode: 'bilingual',
-  chunkChars: 3000,
-  concurrency: 3,
-  skipCode: true,
-  maxSegments: 3000
-};
 
 function setStatus(text, kind = '') {
   statusEl.textContent = text || '';
@@ -71,7 +54,7 @@ function fillSourceLang(current) {
 }
 
 async function load() {
-  const cfg = await chrome.storage.sync.get(DEFAULTS);
+  const cfg = await chrome.storage.sync.get(DEFAULT_SETTINGS);
   apiKeyEl.value = cfg.apiKey || '';
   modelEl.value = cfg.model || 'deepseek-chat';
   styleEl.value = cfg.style || 'natural';

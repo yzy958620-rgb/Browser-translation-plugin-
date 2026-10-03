@@ -83,15 +83,27 @@ Chrome / Edge 把 `Ctrl + T`（新建标签页）设为**浏览器保留快捷�
 ## 文件结构
 
 ```
-manifest.json    扩展清单（MV3）
-background.js    DeepSeek 调用（单条 / 批量）、右键菜单、快捷键
-content.js       全文抓取、视口优先的动态翻译队列（滚动跟随 / 动态内容补翻）、DOM 替换；选中替换
-content.css      沉浸式双语译文标记样式（无浮动面板）
-langs.js         语言列表 60+ 语种（popup / options / background 共用）
-popup.*          弹窗：翻译此页、显示样式、源/目标语言、单条翻译
-options.*        设置页
-icons/           图标
+manifest.json        扩展清单（MV3）
+shared/
+  langs.js           语言列表 60+ 语种 + TIGHT_LANGS / RTL_LANGS + langName / langShort
+  common.js          DEFAULT_SETTINGS、风格表、getSettings()、写剪贴板等小工具
+background/
+  background.js      service worker 装配：内容脚本注入、右键菜单、快捷键、消息路由
+  translate.js       翻译引擎：提示词构建、DeepSeek 调用、漏项拆批重试、照抄检测
+content/
+  content.js         段落采集、视口优先的动态翻译队列（滚动跟随 / 动态内容补翻）、DOM 替换、选区读写、提示条
+  content.css        沉浸式双语译文标记样式（无浮动面板）
+ui/
+  popup.*            弹窗：翻译此页、显示样式、源/目标语言、单条翻译
+  options.*          设置页
+icons/               图标
 ```
+
+加载关系（公共定义只有一份，改一处即全局生效）：
+
+- `content.js` 依赖 `langs.js` → manifest 里两个文件一起注入，补注入时也是。
+- `background.js` 用 `importScripts` 加载 `shared/langs.js`、`shared/common.js`、`background/translate.js`。
+- `ui/popup.html`、`ui/options.html` 先引入 `../shared/langs.js`、`../shared/common.js`，再引入各自脚本。
 
 ## 常见问题
 

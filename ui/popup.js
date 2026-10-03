@@ -1,6 +1,5 @@
-/* popup.js —— 弹窗交互 */
-
-const $ = (sel) => document.querySelector(sel);
+/* popup.js —— 弹窗交互
+   $ / writeClipboard / DEFAULT_SETTINGS 来自 common.js（在 popup.html 里先加载） */
 
 const inputEl = $('#input');
 const outputEl = $('#output');
@@ -52,10 +51,7 @@ function updateCount() {
 }
 
 async function init() {
-  const cfg = await chrome.storage.sync.get({
-    apiKey: '', style: 'natural', targetLang: 'zh', pageMode: 'bilingual',
-    popupSourceLang: 'auto', popupTargetLang: 'en', pageSourceLang: 'auto'
-  });
+  const cfg = await chrome.storage.sync.get(DEFAULT_SETTINGS);
   apiKey = cfg.apiKey || '';
   if (cfg.style) styleEl.value = cfg.style;
   fillLangSelect(targetLangEl, cfg.targetLang, false);
@@ -231,23 +227,5 @@ insertBtn.addEventListener('click', async () => {
   const ok = await writeClipboard(outputEl.value);
   setStatus(ok ? '该页面不支持直接填入，已复制' : '填入失败，请手动复制', ok ? 'ok' : 'error');
 });
-
-async function writeClipboard(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch (_) {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    let ok = false;
-    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
-    ta.remove();
-    return ok;
-  }
-}
 
 init();
