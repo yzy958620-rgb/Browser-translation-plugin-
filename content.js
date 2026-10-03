@@ -302,6 +302,8 @@
     return function accept(node) {
       const text = node.nodeValue;
       if (!text || !text.trim()) return false;
+      // 放在最前面：补扫会频繁遍历整篇文档，已纳入过的节点要走最快的路径
+      if (seenNodes.has(node)) return false;
       if (isTrivialText(text)) return false;
       const parent = node.parentElement;
       if (!parent) return false;
@@ -463,7 +465,11 @@
       if (reorderTimer) return;
       reorderTimer = setTimeout(() => {
         reorderTimer = null;
-        if (pageState) pageState.orderDirty = true;
+        const state = pageState;
+        if (!state) return;
+        state.orderDirty = true;
+        // 整页翻完之后再滚动：顺手补扫一次，把懒加载出来的内容捡回来
+        if (!state.running && !state.queue.length) scheduleSweep(300);
       }, SCROLL_REORDER_DELAY);
     };
     window.addEventListener('scroll', schedule, { passive: true, capture: true });
@@ -502,7 +508,9 @@
   }
 
   /* 中日韩等不使用空格分词的语言，合并译文时不补空格 */
-  const TIGHT_LANGS = new Set(['zh', 'zh-TW', 'ja']);
+  const TIGHT_LANGS = new Set(['zh', 'zh-TW', 'yue', 'ja']);
+  /* 从右向左书写的语言：译文段落交给浏览器自动排版 */
+  const RTL_LANGS = new Set(['ar', 'he', 'fa', 'ur']);
   let curTargetLang = 'zh';
   const groups = new Map();   // 块级容器 -> { el, recs: [] }
 
@@ -520,6 +528,7 @@
       g.el = document.createElement('span');
       g.el.className = 'dst-translation';
       g.el.setAttribute('data-dst-translation', '1');
+      if (RTL_LANGS.has(curTargetLang)) g.el.setAttribute('dir', 'auto');
       target.appendChild(g.el);
     }
     return g;
@@ -609,6 +618,25 @@
 
   /* ---------- 主流程 ---------- */
 
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const MAX_ITEM_TRIES = 3;   // 单条译文最多重试次数，防止死循环
+
+  /* 没翻出来的条目放回队尾稍后重试（退避一下，避免限流时越试越糟） */
+  async function requeueFailed(state, items, reason) {
+    if (reason) state.lastError = reason;
+    const retry = [];
+    for (const it of items) {
+      const tries = (it.tries || 0) + 1;
+      if (tries <= MAX_ITEM_TRIES) retry.push({ rec: it.rec, i: it.i, tries });
+      else state.failed++;      // 重试到上限还没有，只能放弃这一条
+    }
+    if (!retry.length) return;
+    await sleep(400 * Math.max(1, Math.min(3, retry[0].tries)));
+    if (!state.alive) return;
+    state.queue.push(...retry);
+    state.orderDirty = true;
+  }
+
   /* 翻译一批：命中缓存的直接回填，剩余部分交给模型，避免重复消耗额度 */
   async function runBatch(state, batch) {
     const lang = state.targetLang;
@@ -627,32 +655,41 @@
         res = await chrome.runtime.sendMessage({
           type: 'translateBatch',
           items: texts,
-          targetLang: lang
+          targetLang: lang,
+          sourceLang: state.sourceLang
         });
       } catch (_) {
         res = { ok: false, error: '与后台通信失败' };
       }
 
-      const aligned = Array.isArray(res?.translations) && res.translations.length === texts.length;
-      if (res?.ok && aligned) {
+      if (res?.error === 'MISSING_KEY' || res?.fatal) {
+        // Key / 余额问题：重试无意义，直接停下，避免空转几千个请求
+        state.running = false;
+        state.keyError = true;
+        state.lastError = res?.error === 'MISSING_KEY' ? '' : (res?.error || '');
+        return;
+      }
+
+      const arr = Array.isArray(res?.translations) ? res.translations : null;
+      const missed = [];
+      if (res?.ok && arr && arr.length === texts.length) {
         pending.forEach((it, i) => {
-          const val = res.translations[i];
+          const val = arr[i];
           if (typeof val === 'string' && val.trim()) {
             it.rec.segs[it.i].translated = val;
             setCached(texts[i], lang, val);
+          } else {
+            missed.push(it);       // 这一条模型没给译文，稍后自动重试
           }
         });
         state.done++;
       } else {
-        if (res?.error === 'MISSING_KEY') {
-          state.running = false;
-          state.keyError = true;
-          return;
-        }
-        state.failed++;
-        // 译文数量不对时整批作废，避免译文错位显示
-        state.lastError = res?.error ||
-          (Array.isArray(res?.translations) ? '译文数量不匹配，已跳过该批' : '未知错误');
+        // 整批失败（网络 / 限流 / 返回格式异常）：整批放回队列重试，不能默默丢掉
+        missed.push(...pending);
+        state.lastError = res?.error || '批量翻译失败';
+      }
+      if (missed.length) {
+        await requeueFailed(state, missed, state.lastError || '部分段落未翻出来，稍后自动重试');
       }
     } else {
       state.done++;
@@ -675,8 +712,14 @@
     while (state.running) {
       const batch = takeBatch(state);
       if (!batch.length) {
-        if (!inflight.size) break;          // 队列空了且没有在飞的请求
-        await Promise.race(inflight);
+        if (inflight.size) {
+          await Promise.race(inflight);
+          continue;
+        }
+        // 队列见底：补扫一遍文档，把先前隐藏 / 还没渲染 / 超出单次上限的文字捡回来
+        if (Date.now() - (state.lastSweep || 0) < 800) break;
+        state.lastSweep = Date.now();
+        if (!sweepUntranslated()) break;
         continue;
       }
       const p = runBatch(state, batch)
@@ -693,7 +736,10 @@
     if (state.keyError) {
       if (!state.notified) {
         state.notified = true;
-        showToast({ text: '未配置 DeepSeek API Key', level: 'error' });
+        showToast({
+          text: state.lastError ? `翻译已中止：${state.lastError}` : '未配置 DeepSeek API Key',
+          level: 'error'
+        });
         chrome.runtime.sendMessage({ type: 'openOptions' }).catch(() => {});
       }
       return;
@@ -705,67 +751,70 @@
     }
   }
 
-  /* ---------- 动态加载的内容（无限滚动、懒加载）也跟着翻 ---------- */
+  /* ---------- 动态加载的内容（无限滚动、懒加载、折叠展开）也跟着翻 ---------- */
 
   let domObserver = null;
-  let domTimer = null;
-  let pendingRoots = new Set();
+  let sweepTimer = null;
+
+  /* 补扫：把文档里“还没纳入翻译、当前又可见”的文字捡进队列。
+     失效场景——加载时隐藏后来才显示的、懒渲染的、超出单次上限的、无限滚动新加的。 */
+  function sweepUntranslated() {
+    const state = pageState;
+    if (!state || !state.alive) return false;
+    const nodes = collectNodes({ skipCode: state.skipCode, maxSegments: state.maxSegments });
+    if (!nodes.length) return false;
+
+    const fresh = buildRecords(nodes, records.length);
+    records = records.concat(fresh);
+    pushToQueue(fresh, state);
+    state.orderDirty = true;
+    return true;
+  }
+
+  let sweepDelay = Infinity;   // 已排队的补扫延迟，越早越优先
+
+  function scheduleSweep(delay = 400) {
+    if (sweepTimer && delay >= sweepDelay) return;   // 已有更早的计划
+    if (sweepTimer) clearTimeout(sweepTimer);
+    sweepDelay = delay;
+    sweepTimer = setTimeout(() => {
+      sweepTimer = null;
+      sweepDelay = Infinity;
+      if (!pageState || !pageState.alive) return;
+      if (!sweepUntranslated()) return;
+      if (!pageState.running) runQueue(pageState);   // 上一轮已跑完，重新拉起来
+    }, delay);
+  }
 
   function startDomWatch() {
     if (domObserver || !document.body) return;
     domObserver = new MutationObserver((mutations) => {
+      let childAdded = false;   // 新内容：马上补扫
+      let attrChanged = false;  // class/style 变动（动画居多）：慢一点再补扫
       for (const m of mutations) {
+        if (m.type === 'attributes') { attrChanged = true; continue; }
         for (const n of m.addedNodes) {
-          if (n.nodeType === 1) {
-            if (n.closest && n.closest('[data-dst-translation], .zh2en-toast')) continue;
-            pendingRoots.add(n);
-          } else if (n.nodeType === 3 && n.parentElement &&
-            !n.parentElement.closest('[data-dst-translation], .zh2en-toast')) {
-            pendingRoots.add(n.parentElement);
-          }
+          const el = n.nodeType === 1 ? n : n.parentElement;
+          if (el && el.closest && el.closest('[data-dst-translation], .zh2en-toast')) continue;
+          childAdded = true;
+          break;
         }
+        if (childAdded) break;
       }
-      if (!pendingRoots.size || domTimer) return;
-      domTimer = setTimeout(() => { domTimer = null; absorbNewContent(); }, 350);
+      if (childAdded) scheduleSweep(400);
+      else if (attrChanged) scheduleSweep(1500);
     });
-    domObserver.observe(document.body, { childList: true, subtree: true });
+    domObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'hidden', 'aria-hidden']
+    });
   }
 
   function stopDomWatch() {
-    if (domTimer) { clearTimeout(domTimer); domTimer = null; }
-    pendingRoots.clear();
+    if (sweepTimer) { clearTimeout(sweepTimer); sweepTimer = null; }
     if (domObserver) { domObserver.disconnect(); domObserver = null; }
-  }
-
-  /* 新增子树里的文字并入队列：滚到哪翻到哪，不会漏掉无限滚动加载出的内容 */
-  function absorbNewContent() {
-    const state = pageState;
-    const roots = Array.from(pendingRoots);
-    pendingRoots.clear();
-    if (!state || !state.alive || !roots.length) return;
-
-    const accept = textFilter({ skipCode: state.skipCode });
-    const freshNodes = [];
-    const localSeen = new Set();
-    for (const root of roots) {
-      if (!root.isConnected) continue;
-      if (root.nodeType === 3) {
-        if (accept(root) && !localSeen.has(root)) { localSeen.add(root); freshNodes.push(root); }
-        continue;
-      }
-      for (const n of walkText(root, accept, 0)) {
-        if (localSeen.has(n)) continue;
-        localSeen.add(n);
-        freshNodes.push(n);
-      }
-    }
-    if (!freshNodes.length) return;
-
-    const fresh = buildRecords(freshNodes, records.length);
-    records = records.concat(fresh);
-    pushToQueue(fresh, state);
-    state.orderDirty = true;
-    if (!state.running) runQueue(state);   // 上一轮队列已跑完，重新拉起来
   }
 
   async function startPageTranslate() {
@@ -798,11 +847,13 @@
       alive: true,
       queue: [],
       orderDirty: true,
+      lastSweep: 0,
       chunkChars: Number(settings.chunkChars) || 3000,
       concurrency: Math.min(6, Math.max(1, Number(settings.concurrency) || 3)),
       skipCode: settings.skipCode !== false,
       maxSegments: settings.maxSegments,
       targetLang: settings.targetLang,
+      sourceLang: settings.pageSourceLang || 'auto',
       mode: normalizeMode(settings.pageMode),
       done: 0,
       failed: 0,

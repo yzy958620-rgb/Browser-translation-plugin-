@@ -29,9 +29,10 @@
           <label for="targetLang">全文翻译当前网页</label>
           <span class="count">Alt+Shift+T</span>
         </div>
-        <div class="actions">
+        <div class="actions lang-row">
+          <select id="pageSourceLang" title="源语言"></select>
+          <span class="lang-arrow">→</span>
           <select id="targetLang" title="目标语言"></select>
-          <button id="pageBtn" class="primary-btn">翻译此页</button>
         </div>
         <div class="actions">
           <select id="pageMode" title="显示样式">
@@ -39,6 +40,7 @@
             <option value="translation">只显示译文</option>
           </select>
           <button id="restoreBtn" class="ghost-btn">恢复原文</button>
+          <button id="pageBtn" class="primary-btn">翻译此页</button>
         </div>
       </section>
 
@@ -80,7 +82,7 @@
     </main>
 
     <footer class="footer">
-      右键页面 →「DeepSeek 全文翻译此页」· 选中文字右键 →「用 AI 翻译为英文」（固定译为英文）<br />
+      右键页面 →「DeepSeek 全文翻译此页」· 选中文字右键 →「用 AI 翻译为…」（目标语言同下方「单条翻译」）<br />
       快捷键：全文 Alt+Shift+T · 选中 Alt+Shift+S · 恢复 Alt+Shift+R（可在 chrome://extensions/shortcuts 修改）
     </footer>
   </div>

@@ -53,6 +53,11 @@
 
       <div class="grid">
         <div class="field">
+          <label for="pageSourceLang">全文翻译源语言</label>
+          <select id="pageSourceLang"></select>
+          <p class="hint">默认自动检测。网页语言比较小众、或中英夹杂时，指定源语言会更稳。</p>
+        </div>
+        <div class="field">
           <label for="targetLang">全文翻译目标语言</label>
           <select id="targetLang"></select>
         </div>
@@ -97,9 +102,9 @@
 
       <div class="grid">
         <div class="field">
-          <label for="maxSegments">单页最多段落数</label>
+          <label for="maxSegments">单次扫描段落上限</label>
           <input id="maxSegments" type="number" min="200" max="6000" step="100" />
-          <p class="hint">超出后只翻译靠前的部分，避免超长页面耗尽额度。</p>
+          <p class="hint">每轮扫描最多纳入的段落数；超出部分会在下一轮自动补扫，不会漏译。</p>
         </div>
         <div class="field">
           <label class="check-row">

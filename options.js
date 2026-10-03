@@ -14,6 +14,7 @@ const saveBtn = $('#saveBtn');
 const testBtn = $('#testBtn');
 const toggleKeyBtn = $('#toggleKey');
 const targetLangEl = $('#targetLang');
+const pageSourceLangEl = $('#pageSourceLang');
 const pageModeEl = $('#pageMode');
 const chunkEl = $('#chunkChars');
 const chunkValEl = $('#chunkVal');
@@ -30,6 +31,7 @@ const DEFAULTS = {
   glossary: '',
   customPrompt: '',
   targetLang: 'zh',
+  pageSourceLang: 'auto',
   pageMode: 'bilingual',
   chunkChars: 3000,
   concurrency: 3,
@@ -53,6 +55,21 @@ function fillTargetLang(current) {
   targetLangEl.value = LANGUAGES[current] ? current : 'zh';
 }
 
+function fillSourceLang(current) {
+  pageSourceLangEl.innerHTML = '';
+  const auto = document.createElement('option');
+  auto.value = 'auto';
+  auto.textContent = '自动检测 Auto detect';
+  pageSourceLangEl.appendChild(auto);
+  Object.keys(LANGUAGES).forEach((code) => {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = LANGUAGES[code];
+    pageSourceLangEl.appendChild(opt);
+  });
+  pageSourceLangEl.value = LANGUAGES[current] ? current : 'auto';
+}
+
 async function load() {
   const cfg = await chrome.storage.sync.get(DEFAULTS);
   apiKeyEl.value = cfg.apiKey || '';
@@ -64,6 +81,7 @@ async function load() {
   customPromptEl.value = cfg.customPrompt || '';
 
   fillTargetLang(cfg.targetLang);
+  fillSourceLang(cfg.pageSourceLang);
   pageModeEl.value = cfg.pageMode === 'translation' ? 'translation' : 'bilingual';
   chunkEl.value = cfg.chunkChars || 3000;
   chunkValEl.textContent = chunkEl.value;
@@ -82,6 +100,7 @@ function collect() {
     glossary: glossaryEl.value,
     customPrompt: customPromptEl.value,
     targetLang: targetLangEl.value,
+    pageSourceLang: pageSourceLangEl.value,
     pageMode: pageModeEl.value,
     chunkChars: Number(chunkEl.value) || 3000,
     concurrency: Math.min(6, Math.max(1, Number(concEl.value) || 3)),

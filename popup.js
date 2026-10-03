@@ -15,6 +15,7 @@ const settingsBtn = $('#settingsBtn');
 const warnEl = $('#warn');
 const warnBtn = $('#warnBtn');
 const targetLangEl = $('#targetLang');
+const pageSourceLangEl = $('#pageSourceLang');
 const pageBtn = $('#pageBtn');
 const restoreBtn = $('#restoreBtn');
 const sourceLangEl = $('#sourceLang');
@@ -53,11 +54,12 @@ function updateCount() {
 async function init() {
   const cfg = await chrome.storage.sync.get({
     apiKey: '', style: 'natural', targetLang: 'zh', pageMode: 'bilingual',
-    popupSourceLang: 'auto', popupTargetLang: 'en'
+    popupSourceLang: 'auto', popupTargetLang: 'en', pageSourceLang: 'auto'
   });
   apiKey = cfg.apiKey || '';
   if (cfg.style) styleEl.value = cfg.style;
   fillLangSelect(targetLangEl, cfg.targetLang, false);
+  fillLangSelect(pageSourceLangEl, cfg.pageSourceLang, true);
   fillLangSelect(sourceLangEl, cfg.popupSourceLang, true);
   fillLangSelect(popupTargetEl, cfg.popupTargetLang, false);
   pageModeEl.value = cfg.pageMode === 'translation' ? 'translation' : 'bilingual';
@@ -96,6 +98,10 @@ targetLangEl.addEventListener('change', () => {
   chrome.storage.sync.set({ targetLang: targetLangEl.value });
 });
 
+pageSourceLangEl.addEventListener('change', () => {
+  chrome.storage.sync.set({ pageSourceLang: pageSourceLangEl.value });
+});
+
 sourceLangEl.addEventListener('change', () => {
   chrome.storage.sync.set({ popupSourceLang: sourceLangEl.value });
 });
@@ -123,7 +129,10 @@ pageBtn.addEventListener('click', async () => {
     warnEl.classList.remove('hidden');
     return;
   }
-  await chrome.storage.sync.set({ targetLang: targetLangEl.value });
+  await chrome.storage.sync.set({
+    targetLang: targetLangEl.value,
+    pageSourceLang: pageSourceLangEl.value
+  });
   pageBtn.disabled = true;
   pageBtn.textContent = '启动中…';
   try {

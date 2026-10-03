@@ -14,6 +14,7 @@ const DEFAULT_SETTINGS = {
   customPrompt: '',
   // 全文翻译相关
   targetLang: 'zh',
+  pageSourceLang: 'auto',    // 全文翻译源语言，auto = 自动检测
   pageMode: 'bilingual',     // bilingual（沉浸式双语）| translation（只显示译文）
   chunkChars: 3000,          // 每批送出的字符数
   concurrency: 3,            // 并发请求数
@@ -117,10 +118,15 @@ async function translate(text, opts = {}) {
 
 function buildBatchSystemPrompt(settings) {
   const target = langName(settings.targetLang);
+  const src = settings.sourceLang || settings.pageSourceLang || 'auto';
+  const source = (src && src !== 'auto')
+    ? langName(src)
+    : 'the source language (detect it automatically)';
   const glossary = (settings.glossary || '').trim();
   return [
     'You are a professional translation engine working on a web page.',
-    `Translate every string in the user's JSON array "items" into ${target}.`,
+    `Translate every string in the user's JSON array "items" from ${source} into ${target}.`,
+    `Every item must end up in ${target}, no matter which language it is written in.`,
     'Output MUST be strict JSON and nothing else, in this exact shape:',
     '{"translations": ["string 1", "string 2", "..."]}',
     'Rules:',
@@ -194,24 +200,15 @@ async function callDeepSeek(payload, apiKey) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * 批量翻译：items 为字符串数组，返回等长译文数组。
- * @returns {Promise<{ok:boolean, translations?:string[], error?:string}>}
- */
-async function translateBatch(items, targetLang) {
-  const list = Array.isArray(items) ? items : [];
-  if (!list.length) return { ok: true, translations: [] };
-
-  const settings = await getSettings();
-  if (!settings.apiKey) return { ok: false, error: 'MISSING_KEY' };
-
+/* 单次批量请求（含 429 / 5xx 重试）。list 太长时模型容易漏项，所以外层还会拆批。 */
+async function translateChunk(list, ctx) {
   const payload = {
-    model: settings.model || 'deepseek-chat',
+    model: ctx.model,
     messages: [
-      { role: 'system', content: buildBatchSystemPrompt({ ...settings, targetLang: targetLang || settings.targetLang }) },
-      { role: 'user', content: JSON.stringify({ target: langName(targetLang || settings.targetLang), items: list }) }
+      { role: 'system', content: ctx.system },
+      { role: 'user', content: JSON.stringify({ target: ctx.targetName, items: list }) }
     ],
-    temperature: Number(settings.temperature) || 0.3,
+    temperature: ctx.temperature,
     max_tokens: 8192,
     response_format: { type: 'json_object' },
     stream: false
@@ -220,28 +217,86 @@ async function translateBatch(items, targetLang) {
   let lastError = '';
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const data = await callDeepSeek(payload, settings.apiKey);
+      const data = await callDeepSeek(payload, ctx.apiKey);
       const arr = extractTranslations(data?.choices?.[0]?.message?.content);
       if (!arr) {
         lastError = 'AI 返回内容无法解析，请重试';
       } else if (arr.length !== list.length) {
-        // 数量对不上说明漏项，整批作废重试，避免译文错位
+        // 数量对不上说明漏项，本批作废后交给上层拆小重试，避免译文错位
         lastError = `译文数量不匹配（${arr.length}/${list.length}）`;
       } else {
-        const out = list.map((_, i) => {
-          const v = arr[i];
-          return typeof v === 'string' ? v : '';
-        });
-        return { ok: true, translations: out };
+        return {
+          ok: true,
+          translations: list.map((_, i) => (typeof arr[i] === 'string' ? arr[i] : ''))
+        };
       }
     } catch (err) {
       lastError = err?.message || '网络请求失败';
-      const retryable = err?.status === 429 || (err?.status >= 500 && err?.status < 600);
-      if (!retryable) return { ok: false, error: lastError };
+      const status = Number(err?.status) || 0;
+      // 401 / 402 / 403：Key 或余额问题，重试和拆批都没意义，直接让调用方中止整页翻译
+      if (status === 401 || status === 402 || status === 403) {
+        return { ok: false, error: lastError, fatal: true };
+      }
+      const retryable = status === 0 || status === 429 || (status >= 500 && status < 600);
+      if (!retryable) return { ok: false, error: lastError, fatal: true };
     }
     await sleep(800 * (attempt + 1));
   }
   return { ok: false, error: lastError || '翻译失败' };
+}
+
+/**
+ * 整批失败就拆成两半分别重试，一直拆到单条。
+ * 这样模型偶尔漏项只会丢掉少数几条，不会整批作废——这是“滚过去了却没翻译”的主要成因。
+ */
+async function translateItems(list, ctx) {
+  if (!list.length) return { ok: true, translations: [] };
+  const res = await translateChunk(list, ctx);
+  if (res.ok) return res;
+
+  if (res.fatal || list.length === 1) {
+    return { ok: false, error: res.error, fatal: !!res.fatal, translations: list.map(() => '') };
+  }
+
+  const mid = Math.ceil(list.length / 2);
+  const [left, right] = await Promise.all([
+    translateItems(list.slice(0, mid), ctx),
+    translateItems(list.slice(mid), ctx)
+  ]);
+  if (left.fatal || right.fatal) {
+    return { ok: false, error: left.error || right.error, fatal: true, translations: list.map(() => '') };
+  }
+  return {
+    ok: true,
+    partial: !(left.ok && right.ok),
+    error: (left.ok ? '' : left.error) || (right.ok ? '' : right.error) || '',
+    translations: [...left.translations, ...right.translations]
+  };
+}
+
+/**
+ * 批量翻译：items 为字符串数组，返回等长译文数组（失败项为空字符串，由调用方决定是否重试）。
+ * @returns {Promise<{ok:boolean, translations?:string[], error?:string, partial?:boolean}>}
+ */
+async function translateBatch(items, targetLang, sourceLang) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return { ok: true, translations: [] };
+
+  const settings = await getSettings();
+  if (!settings.apiKey) return { ok: false, error: 'MISSING_KEY' };
+
+  const target = targetLang || settings.targetLang;
+  const ctx = {
+    apiKey: settings.apiKey,
+    model: settings.model || 'deepseek-chat',
+    temperature: Number(settings.temperature) || 0.3,
+    targetName: langName(target),
+    system: buildBatchSystemPrompt({ ...settings, targetLang: target, sourceLang: sourceLang || settings.pageSourceLang })
+  };
+
+  const res = await translateItems(list, ctx);
+  if (!res.ok) return { ok: false, error: res.error, fatal: !!res.fatal };
+  return { ok: true, translations: res.translations, partial: !!res.partial, error: res.error || '' };
 }
 
 /* ---------- 与 content script 通信 ---------- */
@@ -265,15 +320,20 @@ async function sendToTab(tabId, message) {
 }
 
 async function handleSelectionTranslate(tabId) {
+  // 选中翻译的目标语言跟随弹窗里「单条翻译」的目标语言，不再固定英语
+  const settings = await getSettings();
+  const targetLang = settings.popupTargetLang || 'en';
+  const targetName = langShort(targetLang);
+
   const sel = await sendToTab(tabId, { type: 'getSelection' });
   const source = sel?.text || '';
   if (!source.trim()) {
-    await sendToTab(tabId, { type: 'toast', text: '请先选中要翻译的中文', level: 'warn' });
+    await sendToTab(tabId, { type: 'toast', text: '请先选中要翻译的文字', level: 'warn' });
     return;
   }
 
-  await sendToTab(tabId, { type: 'toast', text: '正在翻译…', level: 'info', sticky: true });
-  const result = await translate(source);
+  await sendToTab(tabId, { type: 'toast', text: `正在翻译为${targetName}…`, level: 'info', sticky: true });
+  const result = await translate(source, { targetLang, sourceLang: 'auto' });
   if (!result.ok) {
     await sendToTab(tabId, { type: 'toast', text: result.error === 'MISSING_KEY' ? '请先在设置页填写 DeepSeek API Key' : result.error, level: 'error' });
     if (result.error === 'MISSING_KEY') chrome.runtime.openOptionsPage();
@@ -291,7 +351,7 @@ async function handleSelectionTranslate(tabId) {
     } catch (_) { /* ignore */ }
     return;
   }
-  await sendToTab(tabId, { type: 'toast', text: '已替换为英文（可撤销）', level: 'success', undoText: source });
+  await sendToTab(tabId, { type: 'toast', text: `已替换为${targetName}（可撤销）`, level: 'success', undoText: source });
 }
 
 /* ---------- 全文翻译入口 ---------- */
@@ -331,6 +391,7 @@ async function setupMenus() {
   } catch (_) { /* ignore */ }
   const settings = await getSettings();
   const target = langShort(settings.targetLang);
+  const selTarget = langShort(settings.popupTargetLang || 'en');
   chrome.contextMenus.create({
     id: 'dst-page-translate',
     title: `DeepSeek 全文翻译此页 → ${target}`,
@@ -343,12 +404,12 @@ async function setupMenus() {
   });
   chrome.contextMenus.create({
     id: 'ai-zh2en-replace',
-    title: '用 AI 翻译为英文',
+    title: `用 AI 翻译为${selTarget}`,
     contexts: ['selection']
   });
   chrome.contextMenus.create({
     id: 'ai-zh2en-copy',
-    title: '翻译为英文并复制',
+    title: `翻译为${selTarget}并复制`,
     contexts: ['selection']
   });
 }
@@ -358,7 +419,7 @@ chrome.runtime.onStartup.addListener(setupMenus);
 
 /* 设置变化（比如改了目标语言）后重建菜单 */
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'sync' && (changes.targetLang || changes.model)) {
+  if (area === 'sync' && (changes.targetLang || changes.model || changes.popupTargetLang)) {
     setupMenus().catch(() => { /* ignore */ });
   }
 });
@@ -380,7 +441,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'ai-zh2en-copy') {
     const sel = await sendToTab(tab.id, { type: 'getSelection' });
     if (!sel?.text?.trim()) return;
-    const result = await translate(sel.text);
+    const settings = await getSettings();
+    const result = await translate(sel.text, { targetLang: settings.popupTargetLang || 'en', sourceLang: 'auto' });
     if (!result.ok) {
       await sendToTab(tab.id, { type: 'toast', text: result.error === 'MISSING_KEY' ? '请先在设置页填写 DeepSeek API Key' : result.error, level: 'error' });
       return;
@@ -415,7 +477,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg?.type === 'translateBatch') {
-    translateBatch(msg.items, msg.targetLang).then(sendResponse);
+    translateBatch(msg.items, msg.targetLang, msg.sourceLang).then(sendResponse);
     return true;
   }
   if (msg?.type === 'getSettings') {
