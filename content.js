@@ -262,8 +262,8 @@
     }
   }
 
-  let records = [];             // [{ node, original, segs, wrapper }]
-  let pageState = null;         // { chunks, cursor, done, failed, mode, running, targetLang }
+  let records = [];             // [{ idx, node, original, segs, target, group }]，按视口优先级排序
+  let pageState = null;         // { alive, queue, orderDirty, mode, running, pumping, done, failed, ... }
   let getSettingsCache = null;
 
   async function fetchSettings() {
@@ -285,31 +285,55 @@
     return cs.display !== 'none' && cs.visibility !== 'hidden';
   }
 
-  function collectNodes(opts) {
-    if (!document.body) return [];
-    const maxCount = Math.max(50, Number(opts.maxSegments) || 3000);
+  /* 无意义文本：纯数字 / 纯符号 / 孤立单个西文字母。
+     单个字母（如列表标号 “A”、“T.”）翻出来只会变成“一个”这类废话，
+     而 t-shirt、don't 这类多字符词不受影响，照常翻译。 */
+  function isTrivialText(text) {
+    const t = text.trim();
+    if (!t) return true;
+    if (!/\p{L}/u.test(t)) return true;                       // 没有任何字母或汉字
+    const core = t.replace(/[\d\p{P}\p{S}\s]/gu, '');         // 剥掉数字、标点、符号
+    return /^[A-Za-z]$/.test(core);                           // 只剩一个西文字母
+  }
+
+  let seenNodes = new WeakSet();   // 已纳入翻译范围的文本节点（含动态新增的）
+
+  function textFilter(opts) {
+    return function accept(node) {
+      const text = node.nodeValue;
+      if (!text || !text.trim()) return false;
+      if (isTrivialText(text)) return false;
+      const parent = node.parentElement;
+      if (!parent) return false;
+      if (SKIP_TAGS.has(parent.tagName)) return false;
+      if (parent.closest('[data-dst-translation]')) return false;
+      if (parent.closest('.zh2en-toast')) return false;
+      if (opts.skipCode && parent.closest('code, pre, kbd, samp, var')) return false;
+      if (!isVisible(parent)) return false;
+      if (seenNodes.has(node)) return false;
+      return true;
+    };
+  }
+
+  function walkText(root, accept, limit) {
     const found = [];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
-        const text = node.nodeValue;
-        if (!text || !text.trim()) return NodeFilter.FILTER_REJECT;
-        const parent = node.parentElement;
-        if (!parent) return NodeFilter.FILTER_REJECT;
-        if (SKIP_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
-        if (parent.closest('[data-dst-translation]')) return NodeFilter.FILTER_REJECT;
-        if (parent.closest('.zh2en-toast')) return NodeFilter.FILTER_REJECT;
-        if (opts.skipCode && parent.closest('code, pre, kbd, samp, var')) return NodeFilter.FILTER_REJECT;
-        if (!isVisible(parent)) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
+        return accept(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       }
     });
-
     let node;
     while ((node = walker.nextNode())) {
       found.push(node);
-      if (found.length >= maxCount) break;
+      if (limit && found.length >= limit) break;
     }
     return found;
+  }
+
+  function collectNodes(opts) {
+    if (!document.body) return [];
+    const maxCount = Math.max(50, Number(opts.maxSegments) || 3000);
+    return walkText(document.body, textFilter(opts), maxCount);
   }
 
   function splitSegments(text, maxLen) {
@@ -357,11 +381,12 @@
     return scored.map((item) => item.node);
   }
 
-  function buildRecords(nodes) {
-    return nodes.map((node, idx) => {
+  function buildRecords(nodes, baseIdx) {
+    return nodes.map((node, i) => {
       const original = node.nodeValue;
+      seenNodes.add(node);
       return {
-        idx,
+        idx: (baseIdx || 0) + i,
         node,
         original,
         segs: splitSegments(original, ITEM_MAX_CHARS).map((text) => ({ text, translated: null })),
@@ -372,25 +397,77 @@
     });
   }
 
-  function buildChunks(recs, chunkChars) {
-    const items = [];
-    recs.forEach((rec) => rec.segs.forEach((seg, i) => items.push({ rec, i })));
+  /* ---------- 翻译队列：视口优先，随滚动实时重排 ---------- */
 
-    const chunks = [];
-    let buf = [];
+  const SCROLL_REORDER_DELAY = 200;   // 滚动停下多久后才重排，避免滚动中反复回流
+
+  function pushToQueue(recs, state) {
+    recs.forEach((rec) => rec.segs.forEach((seg, i) => state.queue.push({ rec, i })));
+  }
+
+  /* 分档：0 = 正在视口里（马上要读）；1 = 视口下方（马上会读到）；2 = 视口上方；3 = 已脱离文档 */
+  function bandOf(el) {
+    if (!el || !el.isConnected) return { band: 3, dist: 0 };
+    const vh = window.innerHeight || 800;
+    let r = null;
+    try { r = el.getBoundingClientRect(); } catch (_) { return { band: 3, dist: 0 }; }
+    if (!r) return { band: 3, dist: 0 };
+    if (r.bottom >= 0 && r.top <= vh) return { band: 0, dist: 0 };
+    if (r.top > vh) return { band: 1, dist: r.top - vh };
+    return { band: 2, dist: -r.bottom };
+  }
+
+  /* 一次性算完所有矩形再排序，避免逐条读取导致强制回流 */
+  function sortQueue(state) {
+    const q = state.queue;
+    state.orderDirty = false;
+    if (q.length < 2) return;
+    const scored = q.map((it, index) => {
+      const el = it.rec.node.parentElement;
+      const { band, dist } = bandOf(el);
+      return { it, index, band, dist, region: el ? contentPriority(el) : 5 };
+    });
+    scored.sort((a, b) =>
+      a.band - b.band ||
+      a.dist - b.dist ||
+      a.region - b.region ||
+      a.index - b.index
+    );
+    state.queue = scored.map((s) => s.it);
+  }
+
+  function takeBatch(state) {
+    if (state.orderDirty) sortQueue(state);
+    const q = state.queue;
+    const batch = [];
     let chars = 0;
-    for (const it of items) {
+    while (q.length) {
+      const it = q[0];
       const len = it.rec.segs[it.i].text.length;
-      if (buf.length && (buf.length >= CHUNK_MAX_ITEMS || chars + len > chunkChars)) {
-        chunks.push(buf);
-        buf = [];
-        chars = 0;
-      }
-      buf.push(it);
+      if (batch.length && (batch.length >= CHUNK_MAX_ITEMS || chars + len > state.chunkChars)) break;
+      batch.push(q.shift());
       chars += len;
     }
-    if (buf.length) chunks.push(buf);
-    return chunks;
+    return batch;
+  }
+
+  /* 滚动 / 视口变化 → 下一批优先取当前视野内的内容（“跟着滚动翻”） */
+  let reorderTimer = null;
+  let scrollWatchBound = false;
+
+  function bindScrollWatch() {
+    if (scrollWatchBound) return;
+    scrollWatchBound = true;
+    const schedule = () => {
+      if (!pageState || !pageState.queue.length) return;
+      if (reorderTimer) return;
+      reorderTimer = setTimeout(() => {
+        reorderTimer = null;
+        if (pageState) pageState.orderDirty = true;
+      }, SCROLL_REORDER_DELAY);
+    };
+    window.addEventListener('scroll', schedule, { passive: true, capture: true });
+    window.addEventListener('resize', schedule, { passive: true });
   }
 
   /* ---------- DOM 渲染 ---------- */
@@ -532,70 +609,167 @@
 
   /* ---------- 主流程 ---------- */
 
-  async function worker(state, settings) {
-    while (state.running) {
-      const index = state.cursor++;
-      if (index >= state.chunks.length) return;
-      const chunk = state.chunks[index];
-      const lang = settings.targetLang;
+  /* 翻译一批：命中缓存的直接回填，剩余部分交给模型，避免重复消耗额度 */
+  async function runBatch(state, batch) {
+    const lang = state.targetLang;
+    const pending = [];
+    for (const it of batch) {
+      const seg = it.rec.segs[it.i];
+      const cached = getCached(seg.text, lang);
+      if (cached != null) seg.translated = cached;
+      else pending.push(it);
+    }
 
-      // 命中缓存的直接回填，剩余部分再交给模型，避免重复消耗额度
-      const pending = [];
-      for (const it of chunk) {
-        const seg = it.rec.segs[it.i];
-        const cached = getCached(seg.text, lang);
-        if (cached != null) seg.translated = cached;
-        else pending.push(it);
+    if (pending.length) {
+      const texts = pending.map((it) => it.rec.segs[it.i].text);
+      let res = null;
+      try {
+        res = await chrome.runtime.sendMessage({
+          type: 'translateBatch',
+          items: texts,
+          targetLang: lang
+        });
+      } catch (_) {
+        res = { ok: false, error: '与后台通信失败' };
       }
 
-      if (pending.length) {
-        const texts = pending.map((it) => it.rec.segs[it.i].text);
-        let res = null;
-        try {
-          res = await chrome.runtime.sendMessage({
-            type: 'translateBatch',
-            items: texts,
-            targetLang: lang
-          });
-        } catch (_) {
-          res = { ok: false, error: '与后台通信失败' };
-        }
-
-        const aligned = Array.isArray(res?.translations) && res.translations.length === texts.length;
-        if (res?.ok && aligned) {
-          pending.forEach((it, i) => {
-            const val = res.translations[i];
-            if (typeof val === 'string' && val.trim()) {
-              it.rec.segs[it.i].translated = val;
-              setCached(texts[i], lang, val);
-            }
-          });
-          state.done++;
-        } else {
-          if (res?.error === 'MISSING_KEY') {
-            state.running = false;
-            state.keyError = true;
-            return;
+      const aligned = Array.isArray(res?.translations) && res.translations.length === texts.length;
+      if (res?.ok && aligned) {
+        pending.forEach((it, i) => {
+          const val = res.translations[i];
+          if (typeof val === 'string' && val.trim()) {
+            it.rec.segs[it.i].translated = val;
+            setCached(texts[i], lang, val);
           }
-          state.failed++;
-          // 译文数量不对时整批作废，避免译文错位显示
-          state.lastError = res?.error ||
-            (Array.isArray(res?.translations) ? '译文数量不匹配，已跳过该批' : '未知错误');
-        }
-      } else {
+        });
         state.done++;
+      } else {
+        if (res?.error === 'MISSING_KEY') {
+          state.running = false;
+          state.keyError = true;
+          return;
+        }
+        state.failed++;
+        // 译文数量不对时整批作废，避免译文错位显示
+        state.lastError = res?.error ||
+          (Array.isArray(res?.translations) ? '译文数量不匹配，已跳过该批' : '未知错误');
       }
+    } else {
+      state.done++;
+    }
 
-      chunk.forEach((it) => applyRec(it.rec, state.mode));
-      if (!state.running) return;
+    if (!state.alive) return;   // 期间被“恢复原文”了，不要再往回写译文
+    batch.forEach((it) => {
+      try { applyRec(it.rec, state.mode); } catch (_) { /* 单个节点失败不影响整体 */ }
+    });
+  }
+
+  /* 动态调度：保持 concurrency 个批次在飞，每次取批都按“当前滚动位置”重排，
+     所以上下拖动时新进入视野的内容会被插到队首优先翻译。 */
+  async function runQueue(state) {
+    if (state.pumping) return;
+    state.pumping = true;
+    state.running = true;
+    const inflight = new Set();
+
+    while (state.running) {
+      const batch = takeBatch(state);
+      if (!batch.length) {
+        if (!inflight.size) break;          // 队列空了且没有在飞的请求
+        await Promise.race(inflight);
+        continue;
+      }
+      const p = runBatch(state, batch)
+        .catch(() => { /* 单批异常不影响整页 */ })
+        .finally(() => inflight.delete(p));
+      inflight.add(p);
+      if (inflight.size >= state.concurrency) await Promise.race(inflight);
+    }
+
+    await Promise.all(inflight);
+    state.pumping = false;
+    state.running = false;
+
+    if (state.keyError) {
+      if (!state.notified) {
+        state.notified = true;
+        showToast({ text: '未配置 DeepSeek API Key', level: 'error' });
+        chrome.runtime.sendMessage({ type: 'openOptions' }).catch(() => {});
+      }
+      return;
+    }
+    // 失败只在首次出现时提示一次；成功不弹窗（页面本身已经能看到译文）
+    if (state.failed && !state.notified) {
+      state.notified = true;
+      showToast({ text: `部分段落翻译失败：${state.lastError}`, level: 'warn' });
     }
   }
 
-  async function startPageTranslate() {
-    if (pageState?.running) {
-      showToast({ text: '正在翻译中，请稍候…', level: 'info' });
-      return;
+  /* ---------- 动态加载的内容（无限滚动、懒加载）也跟着翻 ---------- */
+
+  let domObserver = null;
+  let domTimer = null;
+  let pendingRoots = new Set();
+
+  function startDomWatch() {
+    if (domObserver || !document.body) return;
+    domObserver = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const n of m.addedNodes) {
+          if (n.nodeType === 1) {
+            if (n.closest && n.closest('[data-dst-translation], .zh2en-toast')) continue;
+            pendingRoots.add(n);
+          } else if (n.nodeType === 3 && n.parentElement &&
+            !n.parentElement.closest('[data-dst-translation], .zh2en-toast')) {
+            pendingRoots.add(n.parentElement);
+          }
+        }
+      }
+      if (!pendingRoots.size || domTimer) return;
+      domTimer = setTimeout(() => { domTimer = null; absorbNewContent(); }, 350);
+    });
+    domObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function stopDomWatch() {
+    if (domTimer) { clearTimeout(domTimer); domTimer = null; }
+    pendingRoots.clear();
+    if (domObserver) { domObserver.disconnect(); domObserver = null; }
+  }
+
+  /* 新增子树里的文字并入队列：滚到哪翻到哪，不会漏掉无限滚动加载出的内容 */
+  function absorbNewContent() {
+    const state = pageState;
+    const roots = Array.from(pendingRoots);
+    pendingRoots.clear();
+    if (!state || !state.alive || !roots.length) return;
+
+    const accept = textFilter({ skipCode: state.skipCode });
+    const freshNodes = [];
+    const localSeen = new Set();
+    for (const root of roots) {
+      if (!root.isConnected) continue;
+      if (root.nodeType === 3) {
+        if (accept(root) && !localSeen.has(root)) { localSeen.add(root); freshNodes.push(root); }
+        continue;
+      }
+      for (const n of walkText(root, accept, 0)) {
+        if (localSeen.has(n)) continue;
+        localSeen.add(n);
+        freshNodes.push(n);
+      }
     }
+    if (!freshNodes.length) return;
+
+    const fresh = buildRecords(freshNodes, records.length);
+    records = records.concat(fresh);
+    pushToQueue(fresh, state);
+    state.orderDirty = true;
+    if (!state.running) runQueue(state);   // 上一轮队列已跑完，重新拉起来
+  }
+
+  async function startPageTranslate() {
+    if (pageState?.running) return;   // 正在翻译中：静默忽略，不再弹提示条
 
     const settings = await fetchSettings();
     if (!settings.apiKey) {
@@ -605,8 +779,10 @@
     }
 
     // 上一轮译文先还原，避免把译文当成原文再翻一次
+    stopDomWatch();
     restoreOriginal();   // 内部会先清掉已插入的译文，再把各节点写回原文
     records = [];
+    seenNodes = new WeakSet();
     curTargetLang = settings.targetLang || 'zh';
 
     const nodes = collectNodes({
@@ -618,56 +794,45 @@
       return;
     }
 
-    records = buildRecords(sortByPriority(nodes));
-    const chunks = buildChunks(records, Number(settings.chunkChars) || 3000);
-
     const state = {
-      chunks,
-      cursor: 0,
+      alive: true,
+      queue: [],
+      orderDirty: true,
+      chunkChars: Number(settings.chunkChars) || 3000,
+      concurrency: Math.min(6, Math.max(1, Number(settings.concurrency) || 3)),
+      skipCode: settings.skipCode !== false,
+      maxSegments: settings.maxSegments,
+      targetLang: settings.targetLang,
+      mode: normalizeMode(settings.pageMode),
       done: 0,
       failed: 0,
-      running: true,
-      mode: normalizeMode(settings.pageMode),
+      running: false,
+      pumping: false,
       keyError: false,
+      notified: false,
       lastError: ''
     };
     pageState = state;
 
-    // 不再弹出悬浮面板，只用一条自动消失的提示条；翻译期间可随时用快捷键还原
-    showToast({ text: '开始翻译，请稍候…（Alt+Shift+R 可还原）', level: 'info' });
+    records = buildRecords(sortByPriority(nodes));
+    pushToQueue(records, state);
 
-    const concurrency = Math.min(6, Math.max(1, Number(settings.concurrency) || 3));
-    const workers = [];
-    for (let i = 0; i < Math.min(concurrency, chunks.length); i++) {
-      workers.push(worker(state, settings));
-    }
-
-    await Promise.all(workers);
-
-    if (state.keyError) {
-      showToast({ text: '未配置 DeepSeek API Key', level: 'error' });
-      chrome.runtime.sendMessage({ type: 'openOptions' }).catch(() => {});
-      return;
-    }
-
-    state.running = false;
-    applyAll(state.mode);
-    if (state.failed && state.done === 0) {
-      showToast({ text: `翻译失败：${state.lastError}`, level: 'error' });
-    } else if (state.failed) {
-      showToast({ text: `完成，但有 ${state.failed} 批失败（${state.lastError}）`, level: 'warn' });
-    } else if (state.mode === 'original') {
-      showToast({ text: `已翻译 ${records.length} 段，当前保持原文显示（弹窗或设置里可切换显示样式）`, level: 'success' });
-    } else {
-      showToast({ text: `已翻译 ${records.length} 段（快捷键 Alt+Shift+R 还原）`, level: 'success' });
-    }
+    bindScrollWatch();
+    startDomWatch();
+    runQueue(state);   // 不 await：后台推进，滚动到哪就优先翻哪
   }
 
   function stopAndRestore() {
-    if (pageState) pageState.running = false;
+    if (pageState) {
+      pageState.alive = false;
+      pageState.running = false;
+      pageState.queue = [];
+    }
+    stopDomWatch();
     pageState = null;
     restoreOriginal();
     records = [];
+    seenNodes = new WeakSet();
   }
 
   /* 快捷键页面级兜底：即使 Chrome commands 失效（焦点异常、冲突等），
