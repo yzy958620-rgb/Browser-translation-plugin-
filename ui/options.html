@@ -117,6 +117,66 @@
     </section>
 
     <section class="card">
+      <h2 class="sec-title">省 token（用量优化）</h2>
+
+      <div class="field">
+        <label class="check-row">
+          <input id="tokenSaver" type="checkbox" />
+          省流模式：精简提示词、收紧输出上限、照抄补救只重问问题条目
+        </label>
+        <p class="hint">
+          提示词每个请求都要发一遍，精简后整页翻译的输入 token 能少一大截。质量要求极高时可关掉。
+        </p>
+      </div>
+
+      <div class="field">
+        <label class="check-row">
+          <input id="skipSameScript" type="checkbox" />
+          跳过「已经是目标语言文字」的段落
+        </label>
+        <p class="hint">
+          例如把英文页翻成中文时，页面里原本就存在的中文标题不再送进模型。整页主体本来就是目标文字时会自动停用它。
+        </p>
+      </div>
+
+      <div class="field">
+        <label class="check-row">
+          <input id="persistCache" type="checkbox" />
+          译文缓存跨页面复用（刷新 / 打开下一页同样命中）
+        </label>
+        <p class="hint">
+          最多保留 800 条、30 分钟，存于本机 chrome.storage.local。改了模型、风格或术语表后缓存自动作废。
+        </p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="sec-title">用量统计</h2>
+      <div class="usage-grid">
+        <div class="usage-item">
+          <span class="usage-num" id="usageRequests">0</span>
+          <span class="usage-label">累计请求</span>
+        </div>
+        <div class="usage-item">
+          <span class="usage-num" id="usagePrompt">0</span>
+          <span class="usage-label">输入 tokens</span>
+        </div>
+        <div class="usage-item">
+          <span class="usage-num" id="usageCompletion">0</span>
+          <span class="usage-label">输出 tokens</span>
+        </div>
+        <div class="usage-item">
+          <span class="usage-num" id="usageCached">0</span>
+          <span class="usage-label">缓存命中 tokens</span>
+        </div>
+      </div>
+      <p class="hint">
+        DeepSeek 对命中上下文缓存的输入按更低单价计费，这里单独记账。全文翻译结束时页面也会提示本次消耗。
+      </p>
+      <button id="resetUsageBtn" class="ghost-btn" type="button">清零统计</button>
+    </section>
+
+    <section class="card">
       <h2 class="sec-title">选中文字翻译</h2>
       <div class="field">
         <label for="glossary">术语表（可选）</label>

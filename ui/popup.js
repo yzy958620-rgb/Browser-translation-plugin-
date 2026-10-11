@@ -190,7 +190,8 @@ async function runTranslate() {
     });
     if (res?.ok) {
       outputEl.value = res.text;
-      setStatus('完成', 'ok');
+      const spent = Number(res.usage?.total) || 0;
+      setStatus(spent ? `完成 · 消耗约 ${formatTokens(spent)} tokens` : '完成', 'ok');
     } else {
       setStatus(res?.error || '翻译失败', 'error');
       if (res?.error === 'MISSING_KEY') warnEl.classList.remove('hidden');

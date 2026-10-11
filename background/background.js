@@ -6,11 +6,12 @@ importScripts('/shared/langs.js', '/shared/common.js', '/background/translate.js
 /* ---------- 与 content script 通信 ---------- */
 
 /* 内容脚本由 manifest 随页面自动注入，这里只兜底「页面在扩展安装/重载之前就已经打开」的情况。
-   注意：content.js 依赖 langs.js 里的 TIGHT_LANGS / RTL_LANGS，必须两者一起注入。 */
+   注意：content.js 依赖 langs.js（语言表 / 书写系统）与 common.js（设置指纹 / 用量格式化），
+   三个文件必须一起注入，顺序保持一致。 */
 async function ensureContentScript(tabId) {
   try {
     await chrome.scripting.insertCSS({ target: { tabId }, files: ['content/content.css'] });
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['shared/langs.js', 'content/content.js'] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['shared/langs.js', 'shared/common.js', 'content/content.js'] });
   } catch (_) {
     /* chrome:// 等不支持注入的页面：忽略 */
   }
@@ -223,6 +224,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     case 'getSettings':
       getSettings()
+        .then(sendResponse)
+        .catch(() => sendResponse(null));
+      return true;
+
+    case 'getUsage':
+      getUsageStats()
+        .then(sendResponse)
+        .catch(() => sendResponse(null));
+      return true;
+
+    case 'resetUsage':
+      resetUsageStats()
+        .then(() => getUsageStats())
         .then(sendResponse)
         .catch(() => sendResponse(null));
       return true;

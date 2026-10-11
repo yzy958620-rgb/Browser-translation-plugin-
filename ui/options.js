@@ -21,6 +21,14 @@ const concEl = $('#concurrency');
 const concValEl = $('#concVal');
 const maxSegEl = $('#maxSegments');
 const skipCodeEl = $('#skipCode');
+const tokenSaverEl = $('#tokenSaver');
+const skipSameScriptEl = $('#skipSameScript');
+const persistCacheEl = $('#persistCache');
+const usageRequestsEl = $('#usageRequests');
+const usagePromptEl = $('#usagePrompt');
+const usageCompletionEl = $('#usageCompletion');
+const usageCachedEl = $('#usageCached');
+const resetUsageBtn = $('#resetUsageBtn');
 
 function setStatus(text, kind = '') {
   statusEl.textContent = text || '';
@@ -72,6 +80,27 @@ async function load() {
   concValEl.textContent = concEl.value;
   maxSegEl.value = cfg.maxSegments || 3000;
   skipCodeEl.checked = cfg.skipCode !== false;
+  tokenSaverEl.checked = cfg.tokenSaver !== false;
+  skipSameScriptEl.checked = cfg.skipSameScript !== false;
+  persistCacheEl.checked = cfg.persistCache !== false;
+
+  loadUsage();
+}
+
+async function loadUsage() {
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'getUsage' });
+    renderUsage(res);
+  } catch (_) {
+    renderUsage(null);
+  }
+}
+
+function renderUsage(u) {
+  usageRequestsEl.textContent = String(u?.requests || 0);
+  usagePromptEl.textContent = formatTokens(u?.prompt || 0);
+  usageCompletionEl.textContent = formatTokens(u?.completion || 0);
+  usageCachedEl.textContent = formatTokens(u?.cached || 0);
 }
 
 function collect() {
@@ -88,7 +117,10 @@ function collect() {
     chunkChars: Number(chunkEl.value) || 3000,
     concurrency: Math.min(6, Math.max(1, Number(concEl.value) || 3)),
     skipCode: skipCodeEl.checked,
-    maxSegments: Number(maxSegEl.value) || 3000
+    maxSegments: Number(maxSegEl.value) || 3000,
+    tokenSaver: tokenSaverEl.checked,
+    skipSameScript: skipSameScriptEl.checked,
+    persistCache: persistCacheEl.checked
   };
 }
 
@@ -114,6 +146,20 @@ saveBtn.addEventListener('click', async () => {
   await chrome.storage.sync.set(collect());
   setStatus('已保存', 'ok');
   setTimeout(() => setStatus(''), 2500);
+});
+
+resetUsageBtn.addEventListener('click', async () => {
+  resetUsageBtn.disabled = true;
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'resetUsage' });
+    renderUsage(res);
+    setStatus('统计已清零', 'ok');
+    setTimeout(() => setStatus(''), 2000);
+  } catch (_) {
+    setStatus('清零失败', 'error');
+  } finally {
+    resetUsageBtn.disabled = false;
+  }
 });
 
 testBtn.addEventListener('click', async () => {

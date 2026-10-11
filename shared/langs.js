@@ -103,6 +103,82 @@ function langShort(code) {
   return (LANGUAGES[code] || LANGUAGES.zh).split(' ')[0] || '中文';
 }
 
+/* 目标语言 -> 主要书写系统。两个用途：
+   1. 全文翻译前跳过「已经是目标语言文字」的段落，省掉整段调用；
+   2. 识别模型把原文照抄回来（详见 background/translate.js）。 */
+const SCRIPT_BY_LANG = {
+  zh: 'han', 'zh-TW': 'han', yue: 'han', ja: 'han', ko: 'hangul',
+  ru: 'cyrillic', uk: 'cyrillic', be: 'cyrillic', bg: 'cyrillic', sr: 'cyrillic',
+  el: 'greek', he: 'hebrew', ar: 'arabic', fa: 'arabic', ur: 'arabic',
+  hi: 'devanagari', mr: 'devanagari', ne: 'devanagari', bn: 'bengali', ta: 'tamil',
+  te: 'telugu', gu: 'gujarati', pa: 'gurmukhi', si: 'sinhala',
+  th: 'thai', lo: 'lao', km: 'khmer', my: 'myanmar',
+  ka: 'georgian', hy: 'armenian', am: 'ethiopic'
+};
+
+const SCRIPT_RANGES = [
+  ['han', /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/],
+  ['hangul', /[\uac00-\ud7af\u1100-\u11ff]/],
+  ['cyrillic', /[\u0400-\u04ff\u0500-\u052f]/],
+  ['greek', /[\u0370-\u03ff]/],
+  ['hebrew', /[\u0590-\u05ff]/],
+  ['arabic', /[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff]/],
+  ['devanagari', /[\u0900-\u097f]/],
+  ['bengali', /[\u0980-\u09ff]/],
+  ['tamil', /[\u0b80-\u0bff]/],
+  ['telugu', /[\u0c00-\u0c7f]/],
+  ['gujarati', /[\u0a80-\u0aff]/],
+  ['gurmukhi', /[\u0a00-\u0a7f]/],
+  ['sinhala', /[\u0d80-\u0dff]/],
+  ['thai', /[\u0e00-\u0e7f]/],
+  ['lao', /[\u0e80-\u0eff]/],
+  ['khmer', /[\u1780-\u17ff]/],
+  ['myanmar', /[\u1000-\u109f]/],
+  ['georgian', /[\u10a0-\u10ff]/],
+  ['armenian', /[\u0530-\u058f]/],
+  ['ethiopic', /[\u1200-\u137f]/]
+];
+
+/* 一段文字的主要书写系统；只有数字 / 标点 / 符号时返回 other */
+function detectScript(text) {
+  const s = String(text || '');
+  for (const [name, re] of SCRIPT_RANGES) if (re.test(s)) return name;
+  return /[A-Za-z]/.test(s) ? 'latin' : 'other';
+}
+
+/* 拉丁字母（含基本变音符号范围）：0x370 以下单独走这条快路径，
+   避免逐字符跑完 20 多个 Unicode 区间——全文翻译时这段要跑几十万次。 */
+const LATIN_RE = /[A-Za-z\u00c0-\u024f\u1e00-\u1eff]/;
+
+/* 整段是否「只由目标书写系统的文字构成」（数字 / 标点 / 符号不算数）。
+   中英夹杂的段落会返回 false —— 那种还是得翻。 */
+function isPureScript(text, script) {
+  const s = String(text || '');
+  let found = '';
+  for (const ch of s) {
+    let name = '';
+    if (ch.charCodeAt(0) < 0x370) {
+      name = LATIN_RE.test(ch) ? 'latin' : '';
+    } else {
+      for (const [n, re] of SCRIPT_RANGES) {
+        if (re.test(ch)) { name = n; break; }
+      }
+    }
+    if (!name) continue;                       // 数字 / 标点 / 空白
+    if (!found) found = name;
+    else if (found !== name) return false;     // 混了别的文字系统
+  }
+  return found === script;
+}
+
+/* 目标语言对应的书写系统；拉丁语系默认 latin */
+function scriptOfLang(code) {
+  return SCRIPT_BY_LANG[code] || 'latin';
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { LANGUAGES, TIGHT_LANGS, RTL_LANGS, langName, langShort };
+  module.exports = {
+    LANGUAGES, TIGHT_LANGS, RTL_LANGS, langName, langShort,
+    SCRIPT_BY_LANG, detectScript, isPureScript, scriptOfLang
+  };
 }

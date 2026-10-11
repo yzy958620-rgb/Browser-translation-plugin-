@@ -233,12 +233,63 @@
   const ITEM_MAX_CHARS = 2000;  // 单个文本超过该长度时按句拆成多段（参考值 2400）
   const CHUNK_MAX_ITEMS = 8;    // 单批最多条目数：条目过多会让模型丢项错位
 
-  // 译文缓存：相同原文重复翻译（重翻、动态页面）直接复用，省额度
-  const CACHE_LIMIT = 500;
+  /* 译文缓存：相同原文重复翻译（重翻、动态页面）直接复用，省额度。
+     开启「跨页面复用」后还会落到 chrome.storage.local，刷新页面 / 打开下一页同样命中。 */
+  const CACHE_LIMIT = 500;      // 内存上限
+  const PERSIST_LIMIT = 800;    // 落盘条数上限
   const CACHE_TTL = 30 * 60 * 1000;
+  const CACHE_STORE_KEY = 'dstCacheV1';
   const translationCache = new Map();
+  let cacheSig = '';            // 设置指纹：模型 / 风格 / 术语表变了，旧译文就不能再拿来用
+  let persistEnabled = true;
+  let persistTimer = null;
 
-  function cacheKey(text, lang) { return `${lang || 'zh'}\n${text}`; }
+  function cacheKey(text, lang) { return `${cacheSig}|${lang || 'zh'}\n${text}`; }
+
+  /* 设置换了就把缓存作废，不然会拿旧模型 / 旧术语表的译文凑数 */
+  function applyCacheSig(sig) {
+    if (sig === cacheSig) return;
+    cacheSig = sig;
+    translationCache.clear();
+  }
+
+  async function loadPersistedCache() {
+    if (!persistEnabled) return;
+    try {
+      const saved = await chrome.storage.local.get(CACHE_STORE_KEY);
+      const blob = saved?.[CACHE_STORE_KEY];
+      if (!blob || blob.sig !== cacheSig) return;     // 指纹不一致 = 设置已变，整份作废
+      const now = Date.now();
+      for (const entry of (blob.entries || [])) {
+        const [key, text, time] = entry;
+        if (!key || now - time > CACHE_TTL) continue;
+        translationCache.set(key, { text, time });
+      }
+    } catch (_) { /* 读不到就当没有缓存，不影响翻译 */ }
+  }
+
+  function schedulePersistCache() {
+    if (!persistEnabled || persistTimer) return;
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      persistCache();
+    }, 8000);
+  }
+
+  async function persistCache() {
+    if (!persistEnabled) return;
+    try {
+      const now = Date.now();
+      const entries = [];
+      for (const [key, v] of translationCache) {
+        if (now - v.time <= CACHE_TTL) entries.push([key, v.text, v.time]);
+      }
+      entries.sort((a, b) => b[2] - a[2]);            // 只留最近用过的
+      await chrome.storage.local.set({
+        [CACHE_STORE_KEY]: { sig: cacheSig, entries: entries.slice(0, PERSIST_LIMIT) }
+      });
+    } catch (_) { /* 落盘失败不影响翻译 */ }
+  }
 
   function getCached(text, lang) {
     const key = cacheKey(text, lang);
@@ -296,6 +347,24 @@
     if (!/\p{L}/u.test(t)) return true;                       // 没有任何字母或汉字
     const core = t.replace(/[\d\p{P}\p{S}\s]/gu, '');         // 剥掉数字、标点、符号
     return /^[A-Za-z]$/.test(core);                           // 只剩一个西文字母
+  }
+
+  /* 整页主体文字属于哪种书写系统（按字符数加权）。
+     用途：如果整页本来就是目标文字（例如法语页翻英语），就不能再按“同文字系统”跳过，
+     否则会把整页都漏掉。 */
+  function dominantScript(texts) {
+    const counts = new Map();
+    for (const t of texts) {
+      const s = detectScript(t);
+      if (s === 'other') continue;
+      counts.set(s, (counts.get(s) || 0) + Math.min(String(t).length, 200));
+    }
+    let best = 'other';
+    let max = 0;
+    for (const [s, c] of counts) {
+      if (c > max) { max = c; best = s; }
+    }
+    return best;
   }
 
   let seenNodes = new WeakSet();   // 已纳入翻译范围的文本节点（含动态新增的）
@@ -384,15 +453,22 @@
     return scored.map((item) => item.node);
   }
 
-  function buildRecords(nodes, baseIdx) {
+  /* skipFn(text) => true 表示这段不用翻（已经是目标语言的文字）。
+     stats.skipped 累计被跳过的段数，只用于结束时的提示文案。 */
+  function buildRecords(nodes, baseIdx, skipFn, stats) {
     return nodes.map((node, i) => {
       const original = node.nodeValue;
       seenNodes.add(node);
+      const segs = splitSegments(original, ITEM_MAX_CHARS).filter((text) => {
+        if (!skipFn || !skipFn(text)) return true;
+        if (stats) stats.skipped++;
+        return false;
+      }).map((text) => ({ text, translated: null }));
       return {
         idx: (baseIdx || 0) + i,
         node,
         original,
-        segs: splitSegments(original, ITEM_MAX_CHARS).map((text) => ({ text, translated: null })),
+        segs,
         target: null,
         group: null
       };
@@ -636,8 +712,12 @@
     for (const it of batch) {
       const seg = it.rec.segs[it.i];
       const cached = getCached(seg.text, lang);
-      if (cached != null) seg.translated = cached;
-      else pending.push(it);
+      if (cached != null) {
+        seg.translated = cached;
+        state.cacheHits++;
+      } else {
+        pending.push(it);
+      }
     }
 
     if (pending.length) {
@@ -667,6 +747,14 @@
         }
         return;
       }
+
+      // 记账：本次实际消耗的 token 与批内去重省下的条数
+      if (res?.usage) {
+        state.usage.prompt += Number(res.usage.prompt) || 0;
+        state.usage.completion += Number(res.usage.completion) || 0;
+      }
+      state.deduped += Number(res?.deduped) || 0;
+      schedulePersistCache();
 
       const arr = Array.isArray(res?.translations) ? res.translations : null;
       const missed = [];
@@ -727,6 +815,7 @@
     await Promise.all(inflight);
     state.pumping = false;
     state.running = false;
+    persistCache();   // 整页翻完落一次盘，下次打开同源内容直接命中
 
     if (state.keyError) {
       if (!state.notified) {
@@ -743,7 +832,19 @@
     if (state.failed && !state.notified) {
       state.notified = true;
       showToast({ text: `部分段落翻译失败：${state.lastError}`, level: 'warn' });
+      return;
     }
+
+    /* 结束时报一次账：花多少 token、省了多少。
+       省下的部分（缓存命中 / 已是目标语言 / 批内去重）才是优化效果最直观的体现。 */
+    const spent = state.usage.prompt + state.usage.completion;
+    if (state.notified || !spent) return;
+    state.notified = true;
+    const parts = [`本次消耗约 ${formatTokens(spent)} tokens`];
+    if (state.cacheHits) parts.push(`缓存命中 ${state.cacheHits} 段`);
+    if (state.skipped) parts.push(`跳过 ${state.skipped} 段`);
+    if (state.deduped) parts.push(`去重 ${state.deduped} 条`);
+    showToast({ text: parts.join(' · '), level: 'success' });
   }
 
   /* ---------- 动态加载的内容（无限滚动、懒加载、折叠展开）也跟着翻 ---------- */
@@ -759,7 +860,7 @@
     const nodes = collectNodes({ skipCode: state.skipCode, maxSegments: state.maxSegments });
     if (!nodes.length) return false;
 
-    const fresh = buildRecords(nodes, records.length);
+    const fresh = buildRecords(nodes, records.length, state.skipFn, state);
     records = records.concat(fresh);
     pushToQueue(fresh, state);
     state.orderDirty = true;
@@ -829,6 +930,11 @@
     seenNodes = new WeakSet();
     curTargetLang = settings.targetLang || 'zh';
 
+    // 设置指纹：模型 / 风格 / 术语表变了就换一批缓存，避免拿旧译文凑数
+    persistEnabled = settings.persistCache !== false;
+    applyCacheSig(cacheFingerprint(settings));
+    await loadPersistedCache();
+
     const nodes = collectNodes({
       skipCode: settings.skipCode !== false,
       maxSegments: settings.maxSegments
@@ -837,6 +943,14 @@
       showToast({ text: '这个页面没有检测到可翻译的文字', level: 'warn' });
       return;
     }
+
+    /* 跳过「已经是目标语言文字」的段落：中文页里的中文标题、英文页里的英文按钮，
+       翻它纯属浪费。整页主体本来就是目标文字时不启用，否则等于把整页都跳过了。 */
+    const targetScript = scriptOfLang(curTargetLang);
+    const pageScript = dominantScript(nodes.map((n) => n.nodeValue));
+    const skipFn = (settings.skipSameScript !== false && pageScript !== targetScript)
+      ? (text) => isPureScript(text, targetScript)
+      : null;
 
     const state = {
       alive: true,
@@ -855,11 +969,16 @@
       pumping: false,
       keyError: false,
       notified: false,
-      lastError: ''
+      lastError: '',
+      skipFn,
+      skipped: 0,          // 因「已是目标语言」而未送出的段数
+      cacheHits: 0,        // 命中缓存的段数
+      deduped: 0,          // 批内去重省掉的条数
+      usage: { prompt: 0, completion: 0 }
     };
     pageState = state;
 
-    records = buildRecords(sortByPriority(nodes));
+    records = buildRecords(sortByPriority(nodes), 0, skipFn, state);
     pushToQueue(records, state);
 
     bindScrollWatch();
